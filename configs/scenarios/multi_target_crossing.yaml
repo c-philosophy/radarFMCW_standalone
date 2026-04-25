@@ -1,0 +1,20 @@
+scenario:
+  type: multi_target
+  num_frames: 100
+  frame_interval: 0.05
+  snr_db: 25.0
+  swerling_model: 0
+  targets:
+    # Two targets with crossing trajectories
+    - id: 1
+      initial_range: 40.0
+      initial_velocity: 8.0
+      initial_angle: 10.0
+      rcs: 1.0
+      motion: constant_velocity
+    - id: 2
+      initial_range: 30.0
+      initial_velocity: -6.0
+      initial_angle: -20.0
+      rcs: 1.0
+      motion: constant_velocity

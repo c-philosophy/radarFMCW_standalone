@@ -1,0 +1,13 @@
+scenario:
+  type: single_target
+  num_frames: 1
+  frame_interval: 0.05
+  snr_db: 25.0
+  swerling_model: 0
+  targets:
+    - id: 1
+      initial_range: 50.0
+      initial_velocity: 10.0
+      initial_angle: 20.0
+      rcs: 1.0
+      motion: constant_velocity

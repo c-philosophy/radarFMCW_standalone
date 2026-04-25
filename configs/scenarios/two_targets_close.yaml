@@ -1,0 +1,20 @@
+scenario:
+  type: multi_target
+  num_frames: 30
+  frame_interval: 0.05
+  snr_db: 28.0
+  swerling_model: 0
+  targets:
+    # Two targets close in range: tests range resolution
+    - id: 1
+      initial_range: 20.0
+      initial_velocity: 10.0
+      initial_angle: 20.0
+      rcs: 1.0
+      motion: constant_velocity
+    - id: 2
+      initial_range: 25.0
+      initial_velocity: 20.0
+      initial_angle: 30.0
+      rcs: 1.0
+      motion: constant_velocity

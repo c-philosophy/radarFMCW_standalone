@@ -1,0 +1,56 @@
+# 77 GHz short-range radar configuration
+# Suitable for automotive short-range / indoor sensing applications
+radar:
+  fc: 7.7e+10            # 77 GHz
+  B: 4.0e+9              # 4 GHz bandwidth (fine range resolution ~3.75 cm)
+  Tc: 2.0e-5             # 20 us chirp time
+  chirp_num: 64          # fewer chirps for faster frame rate
+  sample_num: 512        # fewer samples per chirp
+  antenna_num: 4         # fewer antennas for compact design
+  angle_num: 90          # 90 angle bins
+  noise_figure_db: 12.0
+  rx_gain_db: 25.0
+
+pipeline:
+  stages:
+    - signal_generation
+    - range_fft
+    - doppler_fft
+    - angle_fft
+    - peak_detection
+    - cfar
+    - estimation
+    - tracking
+  detection:
+    cfar_algorithm: os_cfar
+    guard_cells: 2
+    reference_cells: 6
+    pfa: 1.0e-3
+  tracking:
+    filter: kf
+    association: gnn
+    init_threshold: 3
+    coast_threshold: 5
+    dt: 0.02
+  visualization:
+    backend: mpl
+    update_hz: 30
+    panels: [rd_map, ra_map, trajectory, diagnostic]
+  persistence:
+    format: npz
+    save_intermediate: true
+    output_dir: data
+
+scenario:
+  type: single_target
+  num_frames: 20
+  frame_interval: 0.02    # 20ms per frame (50 FPS)
+  snr_db: 20.0
+  swerling_model: 0
+  targets:
+    - id: 1
+      initial_range: 10.0
+      initial_velocity: 5.0
+      initial_angle: 5.0
+      rcs: 1.0
+      motion: constant_velocity
