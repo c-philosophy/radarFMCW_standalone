@@ -16,8 +16,10 @@ class SwerlingModel(IntEnum):
 class TargetFluctuation:
     """Generate fluctuating RCS values per target per frame.
 
-    Swerling 0: constant RCS (returns 1.0 always).
-    Swerling 1/2: chi-square with 2 DOF → exponential distribution.
+    Swerling 0: constant RCS (returns 1.0 always). 
+    
+    Swerling 1/2: chi-square with 2 DOF → exponential distribution. 
+    
     Swerling 3/4: chi-square with 4 DOF → gamma distribution (k=2).
 
     The mean RCS is normalized to the target's rcs parameter.

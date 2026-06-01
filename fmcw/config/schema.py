@@ -1,7 +1,7 @@
 """配置数据类：雷达参数、目标和流水线配置。"""
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
 
 from fmcw.utils.constants import C
@@ -39,7 +39,7 @@ class RadarParams:
     # --- 派生参数（自动计算）---
     S: float = field(init=False)               # Chirp slope (Hz/s)
     wl: float = field(init=False)              # Wavelength (m)
-    antenna_spacing: float = field(init=False)  # Antenna element spacing (m)
+    antenna_spacing: float = field(init=False)  # Antenna element spacing (m): 阵元间距
     Fs: float = field(init=False)              # ADC sampling rate (Hz)
     range_resolution: float = field(init=False)
     velocity_resolution: float = field(init=False)
@@ -101,6 +101,18 @@ class SceneConfig:
     snr_db: float = 25.0              # Target SNR
     swerling_model: int = 0           # Swerling 0-4
 
+@dataclass
+class ProcessingConfig:
+    """FFT processing stage configuration.
+
+    Controls the 3-stage FFT processing chain parameters.
+    """
+
+    range_window: str = "hanning"     # Range FFT 窗函数
+    doppler_window: str = "hanning"   # Doppler FFT 窗函数
+    angle_window: str = "hanning"     # Angle FFT 窗函数
+    downsample: int = 1               # Range FFT 降采样步长
+
 
 @dataclass
 class DetectionConfig:
@@ -111,6 +123,20 @@ class DetectionConfig:
     reference_cells: int = 8
     pfa: float = 1e-4
     os_rank_ratio: float = 0.75       # For OS-CFAR
+    alpha: Optional[float] = None     # None = 从 pfa 自动计算（否则使用显式值）
+
+
+@dataclass
+class EstimationConfig:
+    """Estimation stage configuration.
+
+    Controls the DOA (Direction of Arrival) angle estimation method.
+    """
+
+    doa_method: str = "fft"            # fft, esprit, music, mvdr
+    n_sources: int = 1                 # Number of signal sources (for MUSIC/ESPRIT)
+    angle_resolution: float = 0.1      # Angular grid spacing in deg (for MUSIC/MVDR)
+    scan_range: Tuple[float, float] = (-90.0, 90.0)  # Scan range (for MUSIC/MVDR)
 
 
 @dataclass
@@ -158,7 +184,9 @@ class PipelineConfig:
         "estimation",
         "tracking",
     ])
+    processing: ProcessingConfig = field(default_factory=ProcessingConfig)
     detection: DetectionConfig = field(default_factory=DetectionConfig)
+    estimation: EstimationConfig = field(default_factory=EstimationConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     persistence: PersistenceConfig = field(default_factory=PersistenceConfig)

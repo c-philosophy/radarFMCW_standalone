@@ -191,10 +191,8 @@ class PyQtGraphVisualizer(BaseVisualizer):
         # RD Map
         if "rd_map" in self._panels and rd_map is not None:
             p = self._panels["rd_map"]
-            p["image"].setImage(rd_map.T, autoLevels=False)
-            # Only auto-level on first frame
-            if self._frame_count == 1:
-                p["image"].autoLevels()
+            # 首帧自动计算 levels，后续帧保持首帧的 levels
+            p["image"].setImage(rd_map.T, autoLevels=(self._frame_count == 1))
 
             # Update detection scatter
             if detections is not None and len(detections) > 0:
@@ -206,9 +204,7 @@ class PyQtGraphVisualizer(BaseVisualizer):
         # RA Map
         if "ra_map" in self._panels and ra_map is not None:
             p = self._panels["ra_map"]
-            p["image"].setImage(ra_map.T, autoLevels=False)
-            if self._frame_count == 1:
-                p["image"].autoLevels()
+            p["image"].setImage(ra_map.T, autoLevels=(self._frame_count == 1))
 
         # Trajectory
         if "trajectory" in self._panels:
@@ -239,8 +235,9 @@ class PyQtGraphVisualizer(BaseVisualizer):
 
             if tid not in lines and len(positions) > 0:
                 # Create new line for this track
+                import pyqtgraph as pg
                 color = self._track_color(tid)
-                line = plot.plot([], [], pen=color, symbol="o", symbolSize=5,
+                line = plot.plot([], [], pen=pg.mkPen(color, width=2), symbol="o", symbolSize=5,
                                  name=f"T{tid}", symbolBrush=color)
                 lines[tid] = line
 
@@ -289,6 +286,14 @@ class PyQtGraphVisualizer(BaseVisualizer):
             self._win.close()
             self._win = None
 
+    def refresh(self):
+        """Process Qt events so the timer callback renders the latest frame."""
+        if self._app is None:
+            return
+        from pyqtgraph.Qt import QtCore
+        QtCore.QCoreApplication.processEvents()
+        # QtCore.QCoreApplication.flush()
+
     @staticmethod
     def _track_color(track_id: int):
         """Generate a consistent color for a given track ID."""
@@ -298,5 +303,4 @@ class PyQtGraphVisualizer(BaseVisualizer):
             (148, 103, 189), (140, 86, 75), (227, 119, 194), (127, 127, 127),
             (188, 189, 34), (23, 190, 207),
         ]
-        c = colors[track_id % len(colors)]
-        return pg.mkPen(c, width=2)
+        return colors[track_id % len(colors)]

@@ -32,17 +32,17 @@ def draw_rd_map(
     )
     ax.set_xlabel("Range bin")
     ax.set_ylabel("Doppler bin")
-    ax.set_title("Range-Doppler Map")
+    ax.set_title("Range-Doppler Map", fontsize=10)
 
     if detections is not None and len(detections) > 0:
         ax.scatter(
             detections[:, 1], detections[:, 0],
-            c="white", marker="x", s=80, linewidths=2, label="Detections",
+            c="white", marker="x", s=40, linewidths=2, label="Detections",
         )
     if ground_truth_bins is not None and len(ground_truth_bins) > 0:
         ax.scatter(
             ground_truth_bins[:, 1], ground_truth_bins[:, 0],
-            c="lime", marker="o", s=100, facecolors="none", linewidths=2, label="GT",
+            c="lime", marker="o", s=50, facecolors="none", linewidths=2, label="GT",
         )
     if detections is not None or ground_truth_bins is not None:
         ax.legend(loc="upper right", fontsize=7)
@@ -70,11 +70,11 @@ def draw_ra_map(
     )
     ax.set_xlabel("Range bin")
     ax.set_ylabel("Angle bin")
-    ax.set_title("Range-Angle Map")
+    ax.set_title("Range-Angle Map", fontsize=10)
 
     if estimates:
         r_bins = [e.range_bin for e in estimates]
-        a_bins = [e.angle_bin - angle_num // 2 for e in estimates]
+        a_bins = [e.angle_bin for e in estimates]  # fftshift 后已居中
         ax.scatter(r_bins, a_bins, c="white", marker="x", s=80, linewidths=2)
 
 
@@ -95,7 +95,7 @@ def draw_trajectory(
     ax.clear()
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
-    ax.set_title("Tracking Trajectories")
+    ax.set_title("Tracking Trajectories", fontsize=10)
     ax.set_xlim(*xlim)
     ax.set_ylim(*ylim)
     ax.axhline(0, color="gray", alpha=0.3)
@@ -137,7 +137,7 @@ def draw_diagnostic(
     ax.clear()
     ax.set_xlabel("Frame")
     ax.set_ylabel("Value")
-    ax.set_title("Diagnostics")
+    ax.set_title("Diagnostics", fontsize=10)
     ax.grid(True, alpha=0.3)
 
     if metrics_history:

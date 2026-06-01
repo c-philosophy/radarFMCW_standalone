@@ -104,18 +104,22 @@ def test_range_bin_conversion():
 
 
 def test_velocity_conversion():
-    """Velocity conversion should handle negative velocities."""
+    """fftshift 后，bin D/2 为零速，bin D/2+1 为正速，bin D/2-1 为负速。"""
     radar = RadarParams()
     estimator = ParameterEstimator(radar)
-
-    # Bin 0 should give velocity 0
-    v0, _ = estimator._velocity_from_bin(0)
-    assert abs(v0) < 1e-10, f"Bin 0 should give velocity 0, got {v0}"
-
-    # Bin chirp_num/2 + 1 should give negative velocity
     mid = radar.chirp_num // 2
-    v_neg, _ = estimator._velocity_from_bin(mid + 1)
-    assert v_neg < 0, f"Bin {mid + 1} should give negative velocity, got {v_neg}"
+
+    # fftshift 后: bin mid 对应 DC (velocity = 0)
+    v0 = estimator._velocity_from_bin(mid)
+    assert abs(v0) < 1e-10, f"Bin {mid} (DC after shift) should give 0, got {v0}"
+
+    # bin mid + 1 → positive velocity
+    v_pos = estimator._velocity_from_bin(mid + 1)
+    assert v_pos > 0, f"Bin {mid + 1} should give positive velocity, got {v_pos}"
+
+    # bin mid - 1 → negative velocity
+    v_neg = estimator._velocity_from_bin(mid - 1)
+    assert v_neg < 0, f"Bin {mid - 1} should give negative velocity, got {v_neg}"
 
 
 def test_music_doa():
@@ -184,6 +188,104 @@ def test_tls_esprit():
     assert len(est_angles) == 1
     assert abs(est_angles[0] - 10.0) < 5.0, \
         f"ESPRIT estimated {est_angles[0]:.1f} deg, expected ~10 deg"
+
+
+# ============================================================
+# 新增测试：ParameterEstimator DOA 方法切换
+# ============================================================
+
+def test_estimator_doa_fft_default():
+    """默认 DOA 方法应为 FFT，行为与之前一致。"""
+    radar = RadarParams(antenna_num=8, chirp_num=64, sample_num=256)
+    from fmcw.config.schema import EstimationConfig
+
+    signal = np.random.randn(8, 64, 128) + 1j * np.random.randn(8, 64, 128)
+    signal[:, 20, 50] += 10.0
+    from fmcw.processing.processor import FMCWProcessor
+    proc = FMCWProcessor(radar)
+    result = proc.process(signal)
+
+    est = ParameterEstimator(radar)
+    filtered = np.array([[20, 50]], dtype=np.int64)
+    frame_est = est.estimate(result.s_rda, filtered)
+
+    assert len(frame_est.targets) == 1
+    assert frame_est.targets[0].angle_bin >= 0, "FFT 方法应有有效的 angle_bin"
+
+
+def test_estimator_doa_esprit():
+    """ESPRIT 方法应正常返回角度估计。"""
+    radar = RadarParams(antenna_num=8, chirp_num=64, sample_num=256)
+    from fmcw.config.schema import EstimationConfig
+
+    signal = np.random.randn(8, 64, 128) + 1j * np.random.randn(8, 64, 128)
+    signal[:, 20, 50] += 10.0
+    from fmcw.processing.processor import FMCWProcessor
+    proc = FMCWProcessor(radar)
+    result = proc.process(signal)
+
+    cfg = EstimationConfig(doa_method="esprit")
+    est = ParameterEstimator(radar, config=cfg)
+    filtered = np.array([[20, 50]], dtype=np.int64)
+    frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
+
+    assert len(frame_est.targets) == 1
+    assert -90 <= frame_est.targets[0].angle <= 90, "角度应在 ±90° 范围内"
+    assert frame_est.targets[0].angle_bin == -1, "ESPRIT 方法 angle_bin 应为 -1"
+
+
+def test_estimator_doa_music():
+    """MUSIC 方法应正常返回角度估计。"""
+    radar = RadarParams(antenna_num=8, chirp_num=64, sample_num=256)
+    from fmcw.config.schema import EstimationConfig
+
+    signal = np.random.randn(8, 64, 128) + 1j * np.random.randn(8, 64, 128)
+    signal[:, 20, 50] += 10.0
+    from fmcw.processing.processor import FMCWProcessor
+    proc = FMCWProcessor(radar)
+    result = proc.process(signal)
+
+    cfg = EstimationConfig(doa_method="music", angle_resolution=1.0)
+    est = ParameterEstimator(radar, config=cfg)
+    filtered = np.array([[20, 50]], dtype=np.int64)
+    frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
+
+    assert len(frame_est.targets) == 1
+    assert -90 <= frame_est.targets[0].angle <= 90
+    assert frame_est.targets[0].angle_bin == -1
+
+
+def test_estimator_doa_mvdr():
+    """MVDR 方法应正常返回角度估计。"""
+    radar = RadarParams(antenna_num=8, chirp_num=64, sample_num=256)
+    from fmcw.config.schema import EstimationConfig
+
+    signal = np.random.randn(8, 64, 128) + 1j * np.random.randn(8, 64, 128)
+    signal[:, 20, 50] += 10.0
+    from fmcw.processing.processor import FMCWProcessor
+    proc = FMCWProcessor(radar)
+    result = proc.process(signal)
+
+    cfg = EstimationConfig(doa_method="mvdr", angle_resolution=1.0)
+    est = ParameterEstimator(radar, config=cfg)
+    filtered = np.array([[20, 50]], dtype=np.int64)
+    frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
+
+    assert len(frame_est.targets) == 1
+    assert -90 <= frame_est.targets[0].angle <= 90
+    assert frame_est.targets[0].angle_bin == -1
+
+
+def test_estimator_unknown_doa_raises():
+    """未知 DOA 方法应抛出 ValueError。"""
+    radar = RadarParams()
+    from fmcw.config.schema import EstimationConfig
+    cfg = EstimationConfig(doa_method="invalid_method")
+    est = ParameterEstimator(radar, config=cfg)
+
+    import pytest
+    with pytest.raises(ValueError, match="Unknown DOA method"):
+        est._estimate_angle(np.zeros((8, 10, 10)), 5, 5)
 
 
 if __name__ == "__main__":

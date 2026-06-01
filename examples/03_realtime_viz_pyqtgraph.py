@@ -20,35 +20,41 @@ print("PyQtGraph Real-time Visualization Demo")
 print("=" * 60)
 
 # Configure radar parameters
-radar = RadarParams(fc=79e9, B=0.5e9, Tc=40e-6, chirp_num=128, sample_num=1024, antenna_num=8)
+radar = RadarParams(fc=79e9, B=0.5e9, Tc=40e-6, 
+                    chirp_num=64, sample_num=512, antenna_num=8)
 
 # Multi-target scenario
 scene = SceneConfig(
     type="multi_target",
     num_frames=100,
-    frame_interval=0.05,
-    snr_db=25.0,
+    frame_interval=0.1,
+    snr_db=20.0,
     targets=[
-        TargetSpec(id=1, initial_range=50, initial_velocity=10, initial_angle=20,
+        TargetSpec(id=1, initial_range=50, initial_velocity=-10, initial_angle=45,
                    motion=MotionModel(motion="constant_velocity")),
-        TargetSpec(id=2, initial_range=35, initial_velocity=-5, initial_angle=-15,
+        TargetSpec(id=2, initial_range=25, initial_velocity=-5, initial_angle=-45,
                    motion=MotionModel(motion="constant_velocity")),
     ],
 )
 
 # Pipeline with pyqtgraph backend
 pipeline_cfg = PipelineConfig()
-pipeline_cfg.visualization.backend = "pyqtgraph"
-pipeline_cfg.visualization.update_hz = 20
+pipeline_cfg.visualization.backend = "pyqtgraph" # "mpl" or "pyqtgraph"
+pipeline_cfg.visualization.update_hz = 2
 pipeline_cfg.visualization.panels = ["rd_map", "ra_map", "trajectory", "diagnostic"]
 pipeline_cfg.tracking.filter = "ekf"
-pipeline_cfg.detection.cfar_algorithm = "os_cfar"
+pipeline_cfg.detection.cfar_algorithm = "ca_cfar"
 
 print(f"Backend: {pipeline_cfg.visualization.backend}")
 print(f"Targets: {len(scene.targets)}, Frames: {scene.num_frames}")
 print("Opening pyqtgraph window... (close the window to stop)")
+# 打印雷达的最大无模糊距离、速度以及距离分辨率、速度分辨率
+print(f"Max range: {radar.max_range:.2f} m")
+print(f"Max velocity: {radar.max_velocity:.2f} m/s")
+print(f"Range resolution: {radar.range_resolution:.2f} m")
+print(f"Velocity resolution: {radar.velocity_resolution:.2f} m/s")
 
 pipe = RadarPipeline(radar, pipeline_cfg, scene)
-results = pipe.run()
+results = pipe.run(verbose=True)
 
 print(f"Done. Processed {len(results['estimates'])} frames.")

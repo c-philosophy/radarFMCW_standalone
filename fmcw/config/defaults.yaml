@@ -3,8 +3,8 @@ radar:
   fc: 7.9e+10            # 79 GHz
   B: 5.0e+8              # 0.5 GHz bandwidth
   Tc: 4.0e-5             # 40 us chirp time
-  chirp_num: 128
-  sample_num: 1024
+  chirp_num: 64          # chirp number per frame： 128 -> 64
+  sample_num: 512        # sample number per chirp: 1024 -> 512
   antenna_num: 8
   angle_num: 180
   noise_figure_db: 10.0
@@ -42,7 +42,7 @@ pipeline:
 
 scenario:
   type: single_target
-  num_frames: 1
+  num_frames: 100
   frame_interval: 0.05
   snr_db: 25.0
   swerling_model: 0

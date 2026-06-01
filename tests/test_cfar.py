@@ -22,6 +22,10 @@ def _make_test_rd_map():
     return rd
 
 
+# ============================================================
+# 原有测试（保持向后兼容）
+# ============================================================
+
 def test_cacfar_detects_targets():
     """CA-CFAR should detect the simulated targets."""
     rd = _make_test_rd_map()
@@ -127,6 +131,215 @@ def test_peak_finder_basic():
     target2_found = any(abs(d - 80) <= 2 and abs(r - 120) <= 2 for d, r in peak_set)
     assert target1_found or target2_found, \
         f"应至少检测到一个目标附近的峰值，峰值集合: {peak_set}"
+
+
+# ============================================================
+# 新增测试：alpha 自动计算
+# ============================================================
+
+def test_cacfar_compute_alpha_analytic():
+    """CA-CFAR 解析公式计算应与手动计算一致。"""
+    guard, ref = 2, 8
+    # N = (2*(2+8)+1)^2 - (2*2+1)^2 = 441 - 25 = 416
+    N = (2 * (guard + ref) + 1) ** 2 - (2 * guard + 1) ** 2
+    expected = N * (1e-4 ** (-1.0 / N) - 1.0)
+
+    alpha = CACFAR.compute_alpha(1e-4, guard, ref, method='analytic')
+    assert abs(alpha - expected) < 1e-10, \
+        f"解析公式应精确匹配: expected={expected:.10f}, got={alpha:.10f}"
+
+
+def test_cacfar_auto_alpha():
+    """CA-CFAR 在 alpha=None 时应自动从 pfa 计算且能检测目标。"""
+    rd = _make_test_rd_map()
+    finder = PeakFinder()
+    peaks = finder.detect(rd)
+
+    cfar = CACFAR()
+    detections = cfar.filter(rd, peaks, guard_cells=2, reference_cells=8,
+                             alpha=None, pfa=1e-4)
+    assert isinstance(detections, np.ndarray), "应返回 numpy 数组"
+    assert detections.ndim == 2, "应为 2D 数组"
+
+
+def test_cacfar_explicit_alpha_overrides():
+    """显式提供 alpha 时应跳过自动计算。"""
+    rd = _make_test_rd_map()
+    finder = PeakFinder()
+    peaks = finder.detect(rd)
+
+    cfar = CACFAR()
+    # alpha=None → 自动计算（alpha 较小，检测多）
+    det_auto = cfar.filter(rd, peaks, guard_cells=2, reference_cells=8,
+                           alpha=None, pfa=1e-4)
+    # alpha=100 → 极高门限（检测极少）
+    det_explicit = cfar.filter(rd, peaks, guard_cells=2, reference_cells=8,
+                               alpha=100.0, pfa=1e-4)
+    # 高 alpha 应产生更少或相等的检测
+    assert len(det_explicit) <= len(det_auto), \
+        f"高 alpha 应检测更少: explicit={len(det_explicit)}, auto={len(det_auto)}"
+
+
+def test_oscfar_compute_alpha_converges():
+    """OS-CFAR 数值求解应收敛于合理范围。"""
+    alpha = OSCFAR.compute_alpha(1e-4, 2, 8, rank_ratio=0.75, method='analytic')
+    assert 1.0 < alpha < 500.0, \
+        f"OS-CFAR alpha={alpha:.2f} 超出合理范围 [1, 500]"
+
+
+def test_oscfar_rank_ratio_ordering():
+    """rank_ratio 越高 → 噪声估计越高 → alpha 越低。"""
+    a50 = OSCFAR.compute_alpha(1e-4, 2, 8, rank_ratio=0.5, method='analytic')
+    a75 = OSCFAR.compute_alpha(1e-4, 2, 8, rank_ratio=0.75, method='analytic')
+    a90 = OSCFAR.compute_alpha(1e-4, 2, 8, rank_ratio=0.9, method='analytic')
+
+    assert a75 < a50, \
+        f"75%ile alpha ({a75:.2f}) 应小于 50%ile alpha ({a50:.2f})"
+    assert a90 < a75, \
+        f"90%ile alpha ({a90:.2f}) 应小于 75%ile alpha ({a75:.2f})"
+
+
+def test_gocfar_compute_alpha_converges():
+    """GO-CFAR 数值求解应收敛于合理范围。"""
+    alpha = GOCFAR.compute_alpha(1e-4, 2, 8, method='analytic')
+    assert 1.0 < alpha < 500.0, \
+        f"GO-CFAR alpha={alpha:.2f} 超出合理范围 [1, 500]"
+
+
+def test_socfar_compute_alpha():
+    """SO-CFAR 解析公式应与手动计算一致。"""
+    guard, ref = 2, 8
+    N = (2 * (guard + ref) + 1) ** 2 - (2 * guard + 1) ** 2
+    expected = (N / 2.0) * (1e-4 ** (-2.0 / N) - 1.0)
+
+    alpha = SOCFAR.compute_alpha(1e-4, guard, ref, method='analytic')
+    assert abs(alpha - expected) < 1e-10, \
+        f"SO 解析公式应精确匹配: expected={expected:.6f}, got={alpha:.6f}"
+
+
+def test_auto_alpha_all_variants():
+    """所有 4 种 CFAR 在 alpha=None 时均应正常工作不崩溃。"""
+    rd = _make_test_rd_map()
+    finder = PeakFinder()
+    peaks = finder.detect(rd)
+
+    variants = [
+        ("CA", CACFAR()),
+        ("OS", OSCFAR()),
+        ("GO", GOCFAR()),
+        ("SO", SOCFAR()),
+    ]
+
+    for name, cfar in variants:
+        detections = cfar.filter(rd, peaks, guard_cells=2, reference_cells=8,
+                                 alpha=None, pfa=1e-4)
+        assert isinstance(detections, np.ndarray), \
+            f"{name}-CFAR 应返回 numpy 数组"
+        assert detections.ndim == 2, \
+            f"{name}-CFAR 应返回 2D 数组"
+
+
+def test_compute_alpha_all_methods():
+    """所有 method 选项均应返回合理值。"""
+    for method in ['analytic', 'auto']:
+        a = CACFAR.compute_alpha(1e-4, 2, 8, method=method)
+        assert a > 0, f"method={method}: alpha 应大于 0，实际为 {a}"
+
+
+def test_alpha_pfa_monotonicity():
+    """Pfa 越小 → alpha 越大（更严格的门限）。"""
+    a_high = CACFAR.compute_alpha(1e-2, 2, 8, method='analytic')
+    a_low = CACFAR.compute_alpha(1e-6, 2, 8, method='analytic')
+    assert a_low > a_high, \
+        f"低 Pfa 应有更高 alpha: Pfa=1e-2→{a_high:.2f}, Pfa=1e-6→{a_low:.2f}"
+
+
+# ============================================================
+# 新增测试：detect() 全图 2D CFAR 检测
+# ============================================================
+
+def test_cacfar_detect_basic():
+    """CA-CFAR detect() 应检测到模拟目标。"""
+    rd = _make_test_rd_map()
+    cfar = CACFAR()
+    detections = cfar.detect(rd, guard_cells=2, reference_cells=8, pfa=1e-2)
+    assert isinstance(detections, np.ndarray), "应返回 numpy 数组"
+    assert detections.ndim == 2, "应为 2D 数组"
+    if len(detections) > 0:
+        assert detections.shape[1] == 2, "每行应为 (doppler, range)"
+
+
+def test_cacfar_detect_auto_alpha():
+    """CA-CFAR detect() alpha=None 时应自动计算。"""
+    rd = _make_test_rd_map()
+    cfar = CACFAR()
+    detections = cfar.detect(rd, guard_cells=2, reference_cells=8,
+                             alpha=None, pfa=1e-4)
+    assert isinstance(detections, np.ndarray)
+
+
+def test_cacfar_detect_vs_filter_consistency():
+    """detect() 和 filter() 在相同 alpha 下结果应一致（CA-CFAR）。"""
+    rd = _make_test_rd_map()
+    cfar = CACFAR()
+    alpha = 8.0
+
+    # filter() 需要候选点——用极低门限的 detect 获取
+    candidates = cfar.detect(rd, guard_cells=2, reference_cells=8,
+                             alpha=0.5, pfa=1e-4)
+    det_filter = cfar.filter(rd, candidates, guard_cells=2, reference_cells=8,
+                             alpha=alpha)
+
+    # detect() 直接检测
+    det_detect = cfar.detect(rd, guard_cells=2, reference_cells=8, alpha=alpha)
+
+    # detect 的结果应是 filter 的子集（detect 用全图 uniform_filter，
+    # filter 用逐 cell 精确求和，可能有微小浮点差异）
+    detect_set = set((int(d[0]), int(d[1])) for d in det_detect)
+    filter_set = set((int(d[0]), int(d[1])) for d in det_filter)
+    # 两者交集应 >= 90% 的 filter 结果
+    overlap = detect_set & filter_set
+    if len(filter_set) > 0:
+        assert len(overlap) / len(filter_set) > 0.85, \
+            f"detect 和 filter 结果差异过大: overlap={len(overlap)}, filter={len(filter_set)}"
+
+
+def test_all_variants_detect_no_crash():
+    """所有 4 种 CFAR 变体的 detect() 均不应崩溃。"""
+    rd = _make_test_rd_map()
+    variants = [
+        ("CA", CACFAR()),
+        ("OS", OSCFAR()),
+        ("GO", GOCFAR()),
+        ("SO", SOCFAR()),
+    ]
+    for name, cfar in variants:
+        detections = cfar.detect(rd, guard_cells=2, reference_cells=8,
+                                 pfa=1e-2)
+        assert isinstance(detections, np.ndarray), \
+            f"{name}-CFAR detect() 应返回 numpy 数组"
+
+
+def test_detection_pipeline_standard_mode():
+    """DetectionPipeline 标准模式（无 PeakFinder）应正常工作。"""
+    from fmcw.detection.detector import DetectionPipeline
+
+    rd = _make_test_rd_map()
+    det = DetectionPipeline(cfar_algorithm="ca_cfar")
+    peaks = det.run(rd, guard_cells=2, reference_cells=8, pfa=1e-2)
+    assert isinstance(peaks, np.ndarray)
+    assert peaks.ndim == 2
+
+
+def test_detection_pipeline_legacy_mode():
+    """DetectionPipeline legacy 模式（有 PeakFinder）应正常工作。"""
+    from fmcw.detection.detector import DetectionPipeline
+
+    rd = _make_test_rd_map()
+    det = DetectionPipeline(cfar_algorithm="ca_cfar", peak_finder=PeakFinder())
+    peaks = det.run(rd, guard_cells=2, reference_cells=8, alpha=4.0)
+    assert isinstance(peaks, np.ndarray)
+    assert peaks.ndim == 2
 
 
 if __name__ == "__main__":

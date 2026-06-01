@@ -80,8 +80,10 @@ class FMCWProcessor:
 
     def _compute_rd_map(self, s_rda: np.ndarray) -> np.ndarray:
         """Range-Doppler map: average magnitude over angle dimension."""
-        return np.mean(np.abs(s_rda), axis=0).astype(np.float32)
+        # return np.mean(np.abs(s_rda), axis=0).astype(np.float32)
+        return np.sum(np.abs(s_rda), axis=0).astype(np.float32)
 
     def _compute_ra_map(self, s_rda: np.ndarray) -> np.ndarray:
         """Range-Angle map: average magnitude over Doppler dimension."""
-        return np.mean(np.abs(s_rda), axis=1).astype(np.float32)
+        # return np.mean(np.abs(s_rda), axis=1).astype(np.float32)
+        return np.sum(np.abs(s_rda), axis=1).astype(np.float32)

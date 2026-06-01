@@ -3,6 +3,14 @@
 import logging
 from typing import Dict, Any, Optional, List
 import numpy as np
+
+# 先切换到安全的 matplotlib 后端，避免 PySide6/Qt 绑定缺失导致的 KeyError
+import matplotlib
+try:
+    matplotlib.use("TkAgg")
+except Exception:
+    matplotlib.use("Agg")
+
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
@@ -31,7 +39,7 @@ class MatplotlibVisualizer(BaseVisualizer):
     def __init__(
         self,
         panels: List[str] = None,
-        figsize: tuple = (14, 12),
+        figsize: tuple = (12, 8),
         save_path: Optional[str] = None,
         save_dpi: int = 100,
     ):

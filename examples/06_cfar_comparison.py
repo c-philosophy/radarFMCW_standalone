@@ -24,7 +24,7 @@ radar = RadarParams(fc=79e9, B=0.5e9, Tc=40e-6, chirp_num=128, sample_num=1024, 
 scene = SceneConfig(
     type="multi_target",
     num_frames=5,
-    frame_interval=0.05,
+    frame_interval=0.1,
     snr_db=20.0,  # lower SNR makes CFAR differences more visible
     targets=[
         TargetSpec(id=1, initial_range=30, initial_velocity=10, initial_angle=15,

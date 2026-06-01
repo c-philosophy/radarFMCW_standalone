@@ -89,7 +89,7 @@ class IFSignalGenerator:
         radar = self.radar
 
         # Update range due to velocity over time (range walk)
-        range_now = target.range + target.velocity * frame_idx * dt
+        range_now = target.range #+ target.velocity * frame_idx * dt
 
         # Angle spatial frequency
         const_a = radar.antenna_spacing / radar.wl * np.sin(np.deg2rad(target.angle))
@@ -99,7 +99,7 @@ class IFSignalGenerator:
         const_d = 2.0 * radar.fc / C * radar.Tc * target.velocity
 
         # Beat frequency per sample
-        # phi_r = 2 * pi * (2*S/c/sample_num * Tc) * R  per sample step
+        # phi_r = 2 * pi * (2*S/c/sample_num * Tc) * R  per sample step # 这个公式似乎不太对？
         const_r = 2.0 * radar.S / C / radar.sample_num * radar.Tc * range_now
 
         # Range migration: velocity causes additional per-chirp range shift

@@ -57,12 +57,13 @@ class RadarPipeline:
 
         self._scene = Scene(self.radar, self.scene_config)
 
+        proc_cfg = self.pipeline_config.processing
         self._processor = FMCWProcessor(
             self.radar,
-            downsample=1,
-            range_window=None,
-            doppler_window=None,
-            angle_window=None,
+            downsample=proc_cfg.downsample,
+            range_window=proc_cfg.range_window,
+            doppler_window=proc_cfg.doppler_window,
+            angle_window=proc_cfg.angle_window,
         )
 
         det_cfg = self.pipeline_config.detection
@@ -70,7 +71,8 @@ class RadarPipeline:
             cfar_algorithm=det_cfg.cfar_algorithm,
         )
 
-        self._estimator = ParameterEstimator(self.radar)
+        est_cfg = self.pipeline_config.estimation
+        self._estimator = ParameterEstimator(self.radar, config=est_cfg)
 
         self._trk_cfg = self.pipeline_config.tracking
         self._tracker = MultiTargetTracker(
@@ -107,7 +109,7 @@ class RadarPipeline:
                 },
             })
 
-    def run(self) -> Dict[str, Any]:
+    def run(self, verbose: bool = False) -> Dict[str, Any]:
         """Run the full pipeline for all frames.
 
         Returns:
@@ -124,12 +126,23 @@ class RadarPipeline:
         # Setup visualization
         if self._viz:
             self._viz.setup(self.radar, self.scene_config)
+            self._viz.refresh()  # 让窗口先显示出来
 
         # Process frame-by-frame
+        # 将计时起点重置到循环开始前，用于实时帧率控制
         for frame_idx, signal, targets in self._scene.stream():
+            if verbose:
+                print(f"Processing frame {frame_idx}...")
+
+            # 实时帧率控制：按 frame_interval 节奏推进
+            target_elapsed = frame_idx * self.scene_config.frame_interval
+            actual_elapsed = time.perf_counter() - t_start
+            if actual_elapsed < target_elapsed:
+                time.sleep(target_elapsed - actual_elapsed)
+
             t_frame = time.perf_counter()
             all_signals.append(signal)
-
+  
             # Stage 1: Signal processing
             t0 = time.perf_counter()
             result = self._processor.process(signal)
@@ -144,12 +157,11 @@ class RadarPipeline:
             # Stage 2: Detection
             t0 = time.perf_counter()
             det_cfg = self.pipeline_config.detection
-            candidates = self._detector.peak_finder.detect(result.rd_map)
             filtered = self._detector.run(
                 result.rd_map,
                 guard_cells=det_cfg.guard_cells,
                 reference_cells=det_cfg.reference_cells,
-                alpha=20.0,
+                alpha=det_cfg.alpha,
                 pfa=det_cfg.pfa,
             )
             dt_det = (time.perf_counter() - t0) * 1000
@@ -158,7 +170,7 @@ class RadarPipeline:
                 self._io.logger.log_stage(
                     frame_idx, "detection", dt_det,
                     params={"cfar": det_cfg.cfar_algorithm},
-                    stats={"n_candidates": len(candidates), "n_detections": len(filtered)},
+                    stats={"n_detections": len(filtered)},
                 )
 
             # Stage 3: Estimation
@@ -168,8 +180,15 @@ class RadarPipeline:
                 frame_idx=frame_idx,
                 timestamp=frame_idx * self.scene_config.frame_interval,
                 ground_truth=targets,
+                s_rd=result.s_rd,
             )
             dt_est = (time.perf_counter() - t0) * 1000
+            
+            if verbose:
+                print(f"Estimation: {len(estimates.targets)}")
+                print(f"index | range (m) | vel (m/s) | angle (deg) | doppler bin | range bin | angle bin| amplitude | SNR")
+                for i, est in enumerate(estimates.targets):
+                    print(f"{i} | {est.range:.2f} | {est.velocity:.2f} | {est.angle:.2f} | {est.doppler_bin} | {est.range_bin} | {est.angle_bin} | {est.amplitude:.2f} | {est.snr_db:.2f}")
 
             if self._io:
                 self._io.logger.log_stage(
@@ -195,7 +214,10 @@ class RadarPipeline:
             # Persistence
             if self._io:
                 self._io.save_signal(signal, frame_idx, self.radar, targets)
-                self._io.save_detections(frame_idx, estimates, filtered, candidates, targets)
+                self._io.save_detections(
+                    frame_idx, estimates, filtered,
+                    np.empty((0, 2), dtype=np.int64), targets,
+                )
                 self._io.save_tracks(frame_idx, tracks)
 
             # Visualization
@@ -210,6 +232,7 @@ class RadarPipeline:
                     "ground_truth": targets,
                 }
                 self._viz.update(frame_data)
+                self._viz.refresh()  # 处理 Qt 事件，触发定时器渲染当前帧
 
             # Collect results
             all_results.append(result)
@@ -236,14 +259,19 @@ class RadarPipeline:
         """Generator: yields frame data dicts for custom handling."""
         self._build()
         for frame_idx, signal, targets in self._scene.stream():
+            # 1. Signal processing
             result = self._processor.process(signal)
+            # 2. Detection
             filtered = self._detector.run(
                 result.rd_map,
                 guard_cells=self.pipeline_config.detection.guard_cells,
                 reference_cells=self.pipeline_config.detection.reference_cells,
-                alpha=20.0,
+                alpha=self.pipeline_config.detection.alpha,
+                pfa=self.pipeline_config.detection.pfa,
             )
-            estimates = self._estimator.estimate(result.s_rda, filtered, frame_idx)
+            # 3. Estimation
+            estimates = self._estimator.estimate(result.s_rda, filtered, frame_idx, s_rd=result.s_rd)
+            # 4. Tracking
             tracks, _, _ = self._tracker.process_frame(estimates)
 
             yield {

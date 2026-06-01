@@ -39,6 +39,13 @@ class BaseVisualizer(ABC):
     def stop(self):
         """Stop / close the visualization."""
 
+    def refresh(self):
+        """Process pending GUI events (for real-time backends).
+
+        Called after each frame update to allow the GUI to render.
+        Default is no-op; real-time backends override to process events.
+        """
+
     def save_frame(self, path: str):
         """Save current frame to file (for matplotlib backend)."""
         raise NotImplementedError

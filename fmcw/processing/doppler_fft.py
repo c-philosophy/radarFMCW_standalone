@@ -1,4 +1,9 @@
-"""Doppler FFT: convert slow-time (chirp-to-chirp) phase to velocity."""
+"""Doppler FFT: convert slow-time (chirp-to-chirp) phase to velocity.
+
+Output is fftshifted so that DC (zero velocity) is at the center of the
+spectrum. Bin indexing after shift:
+    bin 0 = -v_max, bin D/2 = DC, bin D-1 = +v_max - dv
+"""
 
 import numpy as np
 from fmcw.utils.window import create_window
@@ -16,6 +21,8 @@ def doppler_fft(
 
     Returns:
         Complex Range-Doppler result of shape (A, D, R_bins).
+        Spectrum is fftshifted: DC at center, negative velocities left,
+        positive velocities right.
     """
     sig = s_r.astype(np.complex64)
 
@@ -23,4 +30,5 @@ def doppler_fft(
         win = create_window(sig.shape[1], window_type)
         sig = sig * win[np.newaxis, :, np.newaxis]
 
-    return np.fft.fft(sig, axis=1).astype(np.complex64)
+    result = np.fft.fft(sig, axis=1).astype(np.complex64)
+    return np.fft.fftshift(result, axes=1)
