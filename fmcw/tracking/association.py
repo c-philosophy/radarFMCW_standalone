@@ -4,44 +4,103 @@ Pure NumPy + SciPy linear_sum_assignment for Hungarian algorithm.
 Registered in AlgorithmRegistry under category "associator".
 """
 
+from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import numpy as np
 from scipy.optimize import linear_sum_assignment
-from scipy.spatial.distance import cdist
 
 from fmcw.core.registry import register_algorithm
 
+
+# ── 关联辅助数据结构与函数 ──────────────────────────────────────────────
+
+@dataclass
+class TrackState:
+    """关联器所需的航迹状态，从 Track 对象提取。
+
+    Attributes:
+        position: 预测位置 (x, y)
+        covariance: 位置协方差 (2x2 子矩阵)
+        velocity: 预测径向速度（用于速度门控）
+        p_velocity: 速度预测方差（用于速度门控）
+    """
+    position: np.ndarray          # (2,)
+    covariance: np.ndarray        # (2, 2)
+    velocity: float = 0.0
+    p_velocity: float = 1.0
+
+
+def mahalanobis_distance(z: np.ndarray, track: TrackState) -> float:
+    """计算测量值 z 到航迹 track 的马氏距离。
+
+    d² = (z - μ)ᵀ · S⁻¹ · (z - μ),  S = P_pos + R
+
+    Args:
+        z: 测量值 (x, y)
+        track: 航迹预测状态
+
+    Returns:
+        马氏距离（标量）
+    """
+    innovation = z - track.position
+    S = track.covariance + np.eye(2) * 0.01
+    return float(np.sqrt(innovation @ np.linalg.solve(S, innovation)))
+
+
+def velocity_gate(z_velocity: float, track: TrackState, n_sigma: float = 3.0) -> bool:
+    """速度门控：检查测量速度与预测速度是否一致。
+
+    Args:
+        z_velocity: 测量径向速度
+        track: 航迹预测状态
+        n_sigma: 门控阈值（标准差倍数）
+
+    Returns:
+        True 表示通过门控（速度一致）
+    """
+    innov = abs(z_velocity - track.velocity)
+    std = np.sqrt(track.p_velocity + 0.1)
+    return innov < n_sigma * std
+
+
+# ── Nearest Neighbor ─────────────────────────────────────────────────────
 
 @register_algorithm("associator", "nn")
 class NearestNeighbor:
     """Nearest Neighbor association with distance gating.
 
-    Simple greedy approach: each track claims the nearest ungated measurement.
+    Supports Euclidean or Mahalanobis distance, with optional velocity gating.
     """
 
-    def __init__(self, gate: float = 3.0):
-        """
-        Args:
-            gate: Maximum allowed distance for association.
-        """
+    def __init__(
+        self,
+        gate: float = 6.0,
+        gate_velocity: float = 3.0,
+        use_mahalanobis: bool = True,
+        use_velocity_gating: bool = True,
+    ):
         self.gate = gate
+        self.gate_velocity = gate_velocity
+        self.use_mahalanobis = use_mahalanobis
+        self.use_velocity_gating = use_velocity_gating
 
     def associate(
         self,
-        track_positions: List[np.ndarray],
+        track_states: List[TrackState],
         measurements: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, List[int]]:
+        velocities: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, List, List[int]]:
         """Associate measurements to tracks.
 
         Args:
-            track_positions: List of (2,) arrays [x, y] for each track.
+            track_states: List of TrackState for each track.
             measurements: (M, 2) array of measurement positions.
+            velocities: Optional (M,) array of radial velocities.
 
         Returns:
-            (assignments, unassigned_tracks, unassigned_meas) where
-            assignments[i] = measurement_idx or -1 for track i.
+            (assignments, unassigned_tracks, unassigned_meas)
         """
-        n_tracks = len(track_positions)
+        n_tracks = len(track_states)
         n_meas = len(measurements)
 
         if n_tracks == 0 or n_meas == 0:
@@ -51,16 +110,28 @@ class NearestNeighbor:
                 list(range(n_meas)),
             )
 
-        dist = cdist(np.array(track_positions), measurements)
+        # Build cost matrix
+        cost = np.zeros((n_tracks, n_meas))
+        for i in range(n_tracks):
+            for j in range(n_meas):
+                if self.use_mahalanobis:
+                    d = mahalanobis_distance(measurements[j], track_states[i])
+                else:
+                    d = float(np.linalg.norm(measurements[j] - track_states[i].position))
 
+                if self.use_velocity_gating and velocities is not None:
+                    if not velocity_gate(velocities[j], track_states[i], self.gate_velocity):
+                        d = 1e10
+
+                cost[i, j] = d if d < self.gate else 1e10
+
+        # Greedy nearest neighbor
         assignments = np.full(n_tracks, -1)
         assigned_meas = set()
 
-        # Greedy nearest neighbor
         for i in range(n_tracks):
-            # Find nearest ungated measurement
-            candidates = [(j, dist[i, j]) for j in range(n_meas)
-                          if j not in assigned_meas and dist[i, j] < self.gate]
+            candidates = [(j, cost[i, j]) for j in range(n_meas)
+                          if j not in assigned_meas and cost[i, j] < self.gate]
             if not candidates:
                 continue
             best_j = min(candidates, key=lambda x: x[1])[0]
@@ -73,22 +144,35 @@ class NearestNeighbor:
         return assignments, unassigned_tracks, unassigned_meas
 
 
+# ── Global Nearest Neighbor ──────────────────────────────────────────────
+
 @register_algorithm("associator", "gnn")
 class GNN:
     """Global Nearest Neighbor via Hungarian (Munkres) algorithm.
 
     Minimizes total assignment cost subject to gating.
+    Supports Euclidean or Mahalanobis distance, with optional velocity gating.
     """
 
-    def __init__(self, gate: float = 3.0):
+    def __init__(
+        self,
+        gate: float = 6.0,
+        gate_velocity: float = 3.0,
+        use_mahalanobis: bool = True,
+        use_velocity_gating: bool = True,
+    ):
         self.gate = gate
+        self.gate_velocity = gate_velocity
+        self.use_mahalanobis = use_mahalanobis
+        self.use_velocity_gating = use_velocity_gating
 
     def associate(
         self,
-        track_positions: List[np.ndarray],
+        track_states: List[TrackState],
         measurements: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, List[int]]:
-        n_tracks = len(track_positions)
+        velocities: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, List, List[int]]:
+        n_tracks = len(track_states)
         n_meas = len(measurements)
 
         if n_tracks == 0 or n_meas == 0:
@@ -98,18 +182,29 @@ class GNN:
                 list(range(n_meas)),
             )
 
-        dist = cdist(np.array(track_positions), measurements)
+        # Build cost matrix
+        cost = np.zeros((n_tracks, n_meas))
+        for i in range(n_tracks):
+            for j in range(n_meas):
+                if self.use_mahalanobis:
+                    d = mahalanobis_distance(measurements[j], track_states[i])
+                else:
+                    d = float(np.linalg.norm(measurements[j] - track_states[i].position))
 
-        # Gate: large cost for ungated associations
-        cost = np.where(dist < self.gate, dist, 1e10)
+                if self.use_velocity_gating and velocities is not None:
+                    if not velocity_gate(velocities[j], track_states[i], self.gate_velocity):
+                        d = 1e10
 
+                cost[i, j] = d if d < self.gate else 1e10
+
+        # Hungarian algorithm
         row_ind, col_ind = linear_sum_assignment(cost)
 
         assignments = np.full(n_tracks, -1)
         assigned_meas = set()
 
         for r, c in zip(row_ind, col_ind):
-            if dist[r, c] < self.gate:
+            if cost[r, c] < self.gate:
                 assignments[r] = c
                 assigned_meas.add(c)
 
@@ -118,6 +213,8 @@ class GNN:
 
         return assignments, unassigned_tracks, unassigned_meas
 
+
+# ── Joint Probabilistic Data Association ─────────────────────────────────
 
 @register_algorithm("associator", "jpda")
 class JPDA:
@@ -128,63 +225,72 @@ class JPDA:
     hard assignment.
 
     This is a simplified single-scan JPDA without track hypothesis trees.
+    Supports Mahalanobis distance and velocity gating.
     """
 
     def __init__(
         self,
-        gate: float = 3.0,
+        gate: float = 6.0,
+        gate_velocity: float = 3.0,
+        use_mahalanobis: bool = True,
+        use_velocity_gating: bool = True,
         Pd: float = 0.9,
         clutter_density: float = 1e-6,
     ):
         self.gate = gate
+        self.gate_velocity = gate_velocity
+        self.use_mahalanobis = use_mahalanobis
+        self.use_velocity_gating = use_velocity_gating
         self.Pd = Pd
         self.clutter_density = clutter_density
 
     def associate(
         self,
-        track_positions: List[np.ndarray],
+        track_states: List[TrackState],
         measurements: np.ndarray,
-    ) -> Tuple[np.ndarray, np.ndarray, List[int], Optional[np.ndarray]]:
+        velocities: Optional[np.ndarray] = None,
+    ) -> Tuple[np.ndarray, List, List[int], Optional[np.ndarray]]:
         """Compute JPDA association.
 
         Returns:
             (assignments, unassigned_tracks, unassigned_meas, beta)
-            where beta[i, j] is the probability that measurement j
-            originates from track i. beta[i, -1] = prob not detected.
         """
-        n_tracks = len(track_positions)
+        n_tracks = len(track_states)
         n_meas = len(measurements)
 
         assignments = np.full(n_tracks, -1)
-        beta = np.zeros((n_tracks, n_meas + 1))  # +1 for "no detection"
+        beta = np.zeros((n_tracks, n_meas + 1))
 
         if n_tracks == 0 or n_meas == 0:
-            beta[:, 0] = 1.0  # All tracks "not detected"
-            return (
-                assignments,
-                list(range(n_tracks)),
-                list(range(n_meas)),
-                beta,
-            )
+            beta[:, 0] = 1.0
+            return (assignments, list(range(n_tracks)), list(range(n_meas)), beta)
 
-        dist = cdist(np.array(track_positions), measurements)
-
-        # Gate likelihoods
-        det_prob = np.where(dist < self.gate, self.Pd, 0.0)
-        beta0 = 1.0 - self.Pd  # Not detected
-
-        # For each track, compute marginal association probabilities
+        # Build distance matrix
+        dist = np.zeros((n_tracks, n_meas))
         for i in range(n_tracks):
-            # Simplification: treat each track independently (not full JPDA)
-            # Full JPDA requires enumerating all feasible joint events
-            # Here we use the PDA approximation per track
-            row = dist[i]
-            valid = dist[i] < self.gate
+            for j in range(n_meas):
+                if self.use_mahalanobis:
+                    dist[i, j] = mahalanobis_distance(measurements[j], track_states[i])
+                else:
+                    dist[i, j] = float(np.linalg.norm(measurements[j] - track_states[i].position))
 
+        # Apply velocity gating
+        gate_mask = dist < self.gate
+        if self.use_velocity_gating and velocities is not None:
+            for i in range(n_tracks):
+                for j in range(n_meas):
+                    if not velocity_gate(velocities[j], track_states[i], self.gate_velocity):
+                        gate_mask[i, j] = False
+
+        beta0 = 1.0 - self.Pd
+
+        for i in range(n_tracks):
+            valid = gate_mask[i]
             if not np.any(valid):
                 beta[i, 0] = 1.0
                 continue
 
+            row = dist[i]
             likelihoods = np.exp(-0.5 * row[valid]**2) * self.Pd
             clutter_term = self.clutter_density * (2 * np.pi)**(2 / 2)
 
@@ -192,7 +298,6 @@ class JPDA:
             beta[i, 0] = beta0 / (likelihoods.sum() + clutter_term + beta0)
             beta[i, 1:][valid] = weights
 
-            # Hard assignment (for compatibility): use max probability
             best = np.argmax(beta[i])
             if best > 0:
                 assignments[i] = best - 1
@@ -202,5 +307,3 @@ class JPDA:
         unassigned_meas = [j for j in range(n_meas) if j not in assigned_meas]
 
         return assignments, unassigned_tracks, unassigned_meas, beta
-
-

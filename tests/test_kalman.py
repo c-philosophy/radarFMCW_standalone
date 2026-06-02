@@ -126,6 +126,49 @@ def test_create_tracker():
     assert isinstance(ukf, UnscentedKalmanFilter)
 
 
+from fmcw.tracking.motion_model import CVModel, CAModel, CTRAModel
+
+
+def test_kf_with_cv_model():
+    """KF 使用显式 CVModel。"""
+    from fmcw.tracking.kalman import KalmanFilter
+    kf = KalmanFilter(dt=0.05, model=CVModel())
+    assert kf.x.shape == (4,)
+    assert kf.F.shape == (4, 4)
+
+
+def test_kf_with_ca_model():
+    """KF 使用 CAModel（状态维度 6）。"""
+    from fmcw.tracking.kalman import KalmanFilter
+    kf = KalmanFilter(dt=0.05, model=CAModel())
+    assert kf.x.shape == (6,)
+    assert kf.F.shape == (6, 6)
+    # H 矩阵应只观测前两维
+    assert kf.H.shape == (2, 6)
+
+
+def test_ekf_with_ca_model():
+    """EKF 使用 CAModel。"""
+    from fmcw.tracking.kalman import ExtendedKalmanFilter
+    ekf = ExtendedKalmanFilter(dt=0.05, model=CAModel())
+    assert ekf.x.shape == (6,)
+    # hx 只依赖前两维
+    ekf.x = np.array([50.0, 10.0, 5.0, 1.0, 0.1, 0.0])
+    z = ekf.hx(ekf.x)
+    assert len(z) == 2
+    assert z[0] > 0  # range > 0
+
+
+def test_ctra_ukf_predict():
+    """UKF + CTRAModel 的 predict 应正确传播。"""
+    from fmcw.tracking.kalman import UnscentedKalmanFilter
+    ukf = UnscentedKalmanFilter(dt=1.0, model=CTRAModel())
+    ukf.x = np.array([0.0, 0.0, 0.0, 10.0, 0.0, 0.0])
+    ukf.predict()
+    # 直线运动 1s，x 方向移动 ~10m
+    assert abs(ukf.x[0] - 10.0) < 1.0
+
+
 if __name__ == "__main__":
     import pytest
     pytest.main([__file__])

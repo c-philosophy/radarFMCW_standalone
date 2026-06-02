@@ -73,7 +73,7 @@ class TrackManager:
 
         if self.tracker_factory is not None:
             kf = self.tracker_factory()
-            if measurement.size == 2:
+            if hasattr(kf, 'init'):
                 kf.init(measurement)
             track.filter = kf
 

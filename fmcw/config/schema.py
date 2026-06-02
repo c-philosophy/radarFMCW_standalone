@@ -151,6 +151,16 @@ class TrackingConfig:
     process_noise: float = 0.01
     measurement_noise: float = 0.1
 
+    # --- IMM 配置 ---
+    enable_imm: bool = False
+    imm_models: tuple = ("cv", "ca", "ctra")
+
+    # --- 关联优化 ---
+    use_mahalanobis: bool = True
+    gate_mahalanobis: float = 6.0
+    use_velocity_gating: bool = True
+    gate_velocity: float = 3.0
+
 
 @dataclass
 class VisualizationConfig:

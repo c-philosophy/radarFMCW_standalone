@@ -13,10 +13,10 @@ from fmcw.core.registry import register_algorithm
 
 
 class KalmanFilter:
-    """Linear Kalman Filter with constant-velocity model.
+    """Linear Kalman Filter with configurable motion model.
 
-    State: [x, y, vx, vy]
-    Observation: [x, y]
+    State: [x, y, vx, vy] (or extended by model)
+    Observation: [x, y] (Cartesian)
 
     Usage:
         kf = KalmanFilter(dt=0.1)
@@ -31,21 +31,30 @@ class KalmanFilter:
         dt: float = 0.1,
         process_noise: float = 0.01,
         measurement_noise: float = 0.1,
+        model: Optional["MotionModel"] = None,
     ):
         self.dt = dt
-        dim_x = 4
+
+        # Default: CVModel (backward compatible)
+        if model is None:
+            from fmcw.tracking.motion_model import CVModel
+            model = CVModel()
+        self.model = model
+
+        dim_x = model.dim
         dim_z = 2
 
-        # State transition: constant velocity
-        self.F = np.eye(dim_x)
-        self.F[0, 2] = dt
-        self.F[1, 3] = dt
+        # State transition from model
+        F = model.F(dt)
+        self.F = F if F is not None else np.eye(dim_x)
 
-        # Observation: direct position
-        self.H = np.array([[1, 0, 0, 0], [0, 1, 0, 0]])
+        # Observation: direct position (first 2 dims)
+        self.H = np.zeros((dim_z, dim_x))
+        self.H[0, 0] = 1.0
+        self.H[1, 1] = 1.0
 
         # Covariance matrices
-        self.Q = np.eye(dim_x) * process_noise
+        self.Q = model.Q(dt, process_noise)
         self.R = np.eye(dim_z) * measurement_noise**2
 
         # State
@@ -56,8 +65,7 @@ class KalmanFilter:
         """Initialize filter with first measurement."""
         self.x[0] = z[0]
         self.x[1] = z[1]
-        self.x[2] = 0.0
-        self.x[3] = 0.0
+        self.x[2:] = 0.0
 
     def predict(self) -> np.ndarray:
         """Predict step: x = F @ x, P = F @ P @ F.T + Q."""
@@ -85,16 +93,14 @@ class KalmanFilter:
 
     @property
     def velocity(self) -> np.ndarray:
-        return self.x[2:]
+        return self.x[2:4]
 
 
 class ExtendedKalmanFilter:
     """Extended Kalman Filter with nonlinear observation model.
 
     Uses [range, azimuth] as observation (typical for radar).
-    State: [x, y, vx, vy] in Cartesian.
-
-    The user provides h(x) and its Jacobian H_jac(x).
+    State defined by motion model (default CV: [x, y, vx, vy]).
     """
 
     def __init__(
@@ -103,16 +109,23 @@ class ExtendedKalmanFilter:
         process_noise: float = 0.01,
         measurement_noise_range: float = 0.1,
         measurement_noise_angle: float = 0.02,
+        model: Optional["MotionModel"] = None,
     ):
         self.dt = dt
-        dim_x = 4
+
+        if model is None:
+            from fmcw.tracking.motion_model import CVModel
+            model = CVModel()
+        self.model = model
+
+        dim_x = model.dim
         dim_z = 2
 
-        self.F = np.eye(dim_x)
-        self.F[0, 2] = dt
-        self.F[1, 3] = dt
+        # State transition from model
+        F = model.F(dt)
+        self.F = F if F is not None else np.eye(dim_x)
 
-        self.Q = np.eye(dim_x) * process_noise
+        self.Q = model.Q(dt, process_noise)
         self.R = np.diag([measurement_noise_range**2, measurement_noise_angle**2])
 
         self.x = np.zeros(dim_x)
@@ -123,8 +136,7 @@ class ExtendedKalmanFilter:
         r, th = z[0], np.deg2rad(z[1])
         self.x[0] = r * np.cos(th)
         self.x[1] = r * np.sin(th)
-        self.x[2] = 0.0
-        self.x[3] = 0.0
+        self.x[2:] = 0.0
 
     def hx(self, x: np.ndarray) -> np.ndarray:
         """Observation function: state → [range, angle]."""
@@ -133,18 +145,21 @@ class ExtendedKalmanFilter:
         return np.array([r, np.rad2deg(th)])
 
     def H_jacobian(self, x: np.ndarray) -> np.ndarray:
-        """Jacobian of hx at state x."""
+        """Jacobian of hx at state x. Only depends on first 2 dims."""
+        dim_x = len(x)
         r2 = x[0]**2 + x[1]**2
         r = np.sqrt(r2)
         if r < 1e-6:
-            return np.zeros((2, 4))
-        return np.array([
-            [x[0] / r, x[1] / r, 0.0, 0.0],
-            [-x[1] / r2, x[0] / r2, 0.0, 0.0],
-        ])
+            return np.zeros((2, dim_x))
+        H = np.zeros((2, dim_x))
+        H[0, 0] = x[0] / r
+        H[0, 1] = x[1] / r
+        H[1, 0] = -x[1] / r2
+        H[1, 1] = x[0] / r2
+        return H
 
     def predict(self) -> np.ndarray:
-        """Linear predict (CV model)."""
+        """Linear predict (CV/CA model)."""
         self.x = self.F @ self.x
         self.P = self.F @ self.P @ self.F.T + self.Q
         return self.x
@@ -164,7 +179,11 @@ class ExtendedKalmanFilter:
         K = self.P @ H.T @ np.linalg.inv(S)
 
         self.x = self.x + K @ y
-        self.P = (np.eye(4) - K @ H) @ self.P
+        self.P = (np.eye(len(self.x)) - K @ H) @ self.P
+
+        # 缓存创新和 S（供 IMM 似然计算使用）
+        self._last_innovation = y.copy()
+        self._last_S = S.copy()
         return self.x
 
     @property
@@ -181,6 +200,7 @@ class UnscentedKalmanFilter:
 
     Handles nonlinear process model f(x) and observation model h(x)
     through statistical linearization via sigma points.
+    Supports linear (CV/CA) and nonlinear (CTRA) motion models.
     """
 
     def __init__(
@@ -189,19 +209,24 @@ class UnscentedKalmanFilter:
         process_noise: float = 0.01,
         measurement_noise_range: float = 0.1,
         measurement_noise_angle: float = 0.02,
+        model: Optional["MotionModel"] = None,
         alpha: float = 0.1,
         beta: float = 2.0,
         kappa: float = 0.0,
     ):
+        if model is None:
+            from fmcw.tracking.motion_model import CVModel
+            model = CVModel()
+        self.model = model
+
         self.dt = dt
-        self.n = 4                         # state dim
-        self.m = 2                         # measurement dim
+        self.n = model.dim                         # state dim
+        self.m = 2                                  # measurement dim
 
-        self.F = np.eye(4)
-        self.F[0, 2] = dt
-        self.F[1, 3] = dt
+        F = model.F(dt)
+        self.F = F if F is not None else np.eye(self.n)
 
-        self.Q = np.eye(self.n) * process_noise
+        self.Q = model.Q(dt, process_noise)
         self.R = np.diag([measurement_noise_range**2, measurement_noise_angle**2])
 
         # Merwe sigma point parameters
@@ -219,11 +244,16 @@ class UnscentedKalmanFilter:
         self.x = np.zeros(self.n)
         self.P = np.eye(self.n) * 100.0
 
+        # Cache for last innovation and S (for IMM likelihood)
+        self._last_innovation = np.zeros(self.m)
+        self._last_S = np.eye(self.m)
+
     def init(self, z: np.ndarray):
         """Initialize from [range, angle] measurement."""
         r, th = z[0], np.deg2rad(z[1])
         self.x[0] = r * np.cos(th)
         self.x[1] = r * np.sin(th)
+        self.x[2:] = 0.0
 
     def sigma_points(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Generate 2n+1 sigma points."""
@@ -238,16 +268,38 @@ class UnscentedKalmanFilter:
 
         return sigmas, self.Wm, self.Wc
 
+    def _propagate_sigmas(self, sigmas: np.ndarray) -> np.ndarray:
+        """Propagate sigma points through motion model."""
+        n = self.n
+        is_linear = self.model.F(self.dt) is not None
+
+        if is_linear:
+            # Linear: F @ sigma
+            return np.array([self.F @ s for s in sigmas])
+        else:
+            # Nonlinear (CTRA): use model.propagate
+            return np.array([self.model.propagate(s, self.dt) for s in sigmas])
+
     def hx(self, x: np.ndarray) -> np.ndarray:
-        """Observation: Cartesian → [range, azimuth_deg]."""
+        """Observation: Cartesian state → [range, azimuth_deg]."""
         r = np.sqrt(x[0]**2 + x[1]**2)
         th = np.arctan2(x[1], x[0])
         return np.array([r, np.rad2deg(th)])
 
     def predict(self) -> np.ndarray:
-        """UKF predict (linear CV model)."""
-        self.x = self.F @ self.x
-        self.P = self.F @ self.P @ self.F.T + self.Q
+        """UKF predict with sigma point propagation."""
+        sigmas, Wm, Wc = self.sigma_points()
+        sigmas_prop = self._propagate_sigmas(sigmas)
+
+        # Weighted mean
+        self.x = np.dot(Wm, sigmas_prop)
+
+        # Weighted covariance
+        self.P = self.Q.copy()
+        for i in range(2 * self.n + 1):
+            diff = sigmas_prop[i] - self.x
+            self.P += Wc[i] * np.outer(diff, diff)
+
         return self.x
 
     def update(self, z: np.ndarray) -> np.ndarray:
@@ -287,6 +339,10 @@ class UnscentedKalmanFilter:
             innovation[1] -= 360
         while innovation[1] < -180:
             innovation[1] += 360
+
+        # Cache for IMM likelihood
+        self._last_innovation = innovation.copy()
+        self._last_S = S.copy()
 
         self.x = self.x + K @ innovation
         self.P = self.P - K @ S @ K.T
