@@ -15,9 +15,31 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 
 from .base import BaseVisualizer
-from .panels import draw_rd_map, draw_ra_map, draw_trajectory, draw_diagnostic
+from .panels import (
+    draw_rd_map, draw_ra_map, draw_trajectory, draw_diagnostic,
+    draw_detection_table, draw_tracking_table, MAX_VISIBLE_ROWS,
+)
 
 _logger = logging.getLogger(__name__)
+
+
+def _position_slider(slider, slider_ax, table_ax, val_max: int):
+    """更新滑动条范围/可见性，并将位置紧贴到表格右侧（在 draw 之后调用）。"""
+    if slider is None or slider_ax is None or table_ax is None:
+        return
+    if val_max <= 0:
+        slider_ax.set_visible(False)
+        return
+
+    slider_ax.set_visible(True)
+    slider.valmax = val_max
+    slider.ax.set_ylim(0, val_max)
+    if slider.val > val_max:
+        slider.set_val(val_max)
+
+    # 滑动条位置 = 表格 axes 右边缘 + 间隙
+    pos = table_ax.get_position()
+    slider_ax.set_position([pos.x1 + 0.008, pos.y0, 0.015, pos.height])
 
 
 class MatplotlibVisualizer(BaseVisualizer):
@@ -39,7 +61,7 @@ class MatplotlibVisualizer(BaseVisualizer):
     def __init__(
         self,
         panels: List[str] = None,
-        figsize: tuple = (12, 8),
+        figsize: tuple = (14, 12),  # GridSpec 高度比 2.5:2.5:1
         save_path: Optional[str] = None,
         save_dpi: int = 100,
     ):
@@ -51,10 +73,19 @@ class MatplotlibVisualizer(BaseVisualizer):
         self.axes = {}
         self._frames_data = []
         self._anim = None
+        # 滑动条（setup 中创建）
+        self._det_slider = None
+        self._trk_slider = None
+        self._det_slider_ax = None
+        self._trk_slider_ax = None
 
     def setup(self, radar_params, scene_config=None):
-        """Create the 4-panel figure."""
-        self.fig = plt.figure(figsize=self.figsize)
+        """Create the 6-panel figure (3×2 layout，带滑动条)。"""
+        from matplotlib.widgets import Slider
+
+        # GridSpec: 图表行 2.5 倍于表格行高度
+        self.fig = plt.figure(figsize=self.figsize, constrained_layout=True)
+        gs = self.fig.add_gridspec(3, 2, height_ratios=[2.5, 2.5, 1.0])
         self.radar = radar_params
 
         panel_map = {
@@ -67,9 +98,26 @@ class MatplotlibVisualizer(BaseVisualizer):
         self.axes = {}
         for panel in self.panels:
             if panel in panel_map:
-                self.axes[panel] = self.fig.add_subplot(2, 2, panel_map[panel][0] * 2 + panel_map[panel][1] + 1)
+                row, col = panel_map[panel]
+                self.axes[panel] = self.fig.add_subplot(gs[row, col])
 
-        plt.tight_layout()
+        # 信息表格在 Row 2
+        self.axes["det_table"] = self.fig.add_subplot(gs[2, 0])
+        self.axes["trk_table"] = self.fig.add_subplot(gs[2, 1])
+
+        # 创建两个垂直滑动条（紧贴表格右侧，初始范围 >0 避免 ylim 警告）
+        self._det_slider_ax = self.fig.add_axes([0.435, 0.06, 0.02, 0.10])
+        self._det_slider = Slider(
+            self._det_slider_ax, "", valmin=0, valmax=1, valinit=0, valstep=1,
+            orientation="vertical",
+        )
+        self._det_slider_ax.set_visible(False)
+        self._trk_slider_ax = self.fig.add_axes([0.905, 0.06, 0.02, 0.10])
+        self._trk_slider = Slider(
+            self._trk_slider_ax, "", valmin=0, valmax=1, valinit=0, valstep=1,
+            orientation="vertical",
+        )
+        self._trk_slider_ax.set_visible(False)
 
     def update(self, frame_data: Dict[str, Any]):
         """Render one frame."""
@@ -103,7 +151,6 @@ class MatplotlibVisualizer(BaseVisualizer):
         if "trajectory" in self.axes:
             gt_positions = None
             if ground_truth:
-                # Convert polar ground truth to Cartesian
                 gt_positions = []
                 for gt in ground_truth:
                     r = gt.range if hasattr(gt, 'range') else gt[0]
@@ -135,7 +182,46 @@ class MatplotlibVisualizer(BaseVisualizer):
             )
             draw_diagnostic(self.axes["diagnostic"], self._metrics_history)
 
+        # Detection / Tracking 信息表格 + 滑动条
+        n_targets = len(estimates.targets) if (
+            estimates and hasattr(estimates, "targets")
+        ) else 0
+        n_tracks = len(tracks)
+
+        det_max = max(0, n_targets - MAX_VISIBLE_ROWS)
+        trk_max = max(0, n_tracks - MAX_VISIBLE_ROWS)
+
+        # 获取滑动条当前偏移（跨帧保持）
+        if det_max > 0 and self._det_slider is not None:
+            det_offset = min(int(self._det_slider.val), det_max)
+        else:
+            det_offset = 0
+        if trk_max > 0 and self._trk_slider is not None:
+            trk_offset = min(int(self._trk_slider.val), trk_max)
+        else:
+            trk_offset = 0
+
+        # 绘制表格（单次，不再双重绘制）
+        if "det_table" in self.axes:
+            draw_detection_table(
+                self.axes["det_table"], estimates,
+                scroll_offset=det_offset, max_visible=MAX_VISIBLE_ROWS,
+            )
+        if "trk_table" in self.axes:
+            draw_tracking_table(
+                self.axes["trk_table"], tracks,
+                scroll_offset=trk_offset, max_visible=MAX_VISIBLE_ROWS,
+            )
+
+        # 先 draw 让 constrained_layout 计算所有 axes 位置
         self.fig.canvas.draw()
+
+        # 在 draw 之后更新滑动条范围和位置（此时 axes 位置已确定）
+        _position_slider(self._det_slider, self._det_slider_ax,
+                         self.axes.get("det_table"), det_max)
+        _position_slider(self._trk_slider, self._trk_slider_ax,
+                         self.axes.get("trk_table"), trk_max)
+
         self.fig.canvas.flush_events()
 
     def run(self):
