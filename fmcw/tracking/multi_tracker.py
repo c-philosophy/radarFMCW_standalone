@@ -83,6 +83,7 @@ class MultiTargetTracker:
             "cv":   ExtendedKalmanFilter,
             "ca":   ExtendedKalmanFilter,
             "ctra": UnscentedKalmanFilter,
+            # "ctra": ExtendedKalmanFilter,
         }
 
         branches = []
@@ -129,13 +130,13 @@ class MultiTargetTracker:
         for i, track in enumerate(active_tracks):
             if assignments[i] >= 0:
                 meas = measurements[assignments[i]]
-                if self._tracker_type in ("ekf", "ukf") and not self.enable_imm:
-                    # 单 EKF/UKF 模式：极坐标观测
+                if self._tracker_type in ("ekf", "ukf") or self.enable_imm:
+                    # EKF/UKF/IMM 模式：极坐标观测
                     r = np.sqrt(meas[0]**2 + meas[1]**2)
                     th = np.rad2deg(np.arctan2(meas[1], meas[0]))
                     self.track_manager.update(track, np.array([r, th]))
                 else:
-                    # KF 或 IMM 模式：直接使用笛卡尔坐标
+                    # KF 模式：直接使用笛卡尔坐标
                     self.track_manager.update(track, meas)
 
         # Coast unassigned tracks
@@ -147,7 +148,14 @@ class MultiTargetTracker:
         new_tracks = []
         for idx in unassigned_meas:
             meas = measurements[idx]
-            track = self.track_manager.initiate(meas)
+            vel = velocities[idx]
+            if self.enable_imm:
+                # IMM 分支需要极坐标观测
+                r_i = np.sqrt(meas[0]**2 + meas[1]**2)
+                th_i = np.rad2deg(np.arctan2(meas[1], meas[0]))
+                track = self.track_manager.initiate(np.array([r_i, th_i]), vel)
+            else:
+                track = self.track_manager.initiate(meas, vel)
             new_tracks.append(track)
 
         # Prune deleted tracks

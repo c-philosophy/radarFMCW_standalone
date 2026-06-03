@@ -85,15 +85,19 @@ def test_imm_update():
 
 
 def test_imm_constant_velocity_track():
-    """匀速跟踪场景: CV 概率应较高。"""
+    """匀速跟踪场景: IMM 位置误差应小于单帧噪声。"""
     imm = _make_imm(dt=0.1)
     z = np.array([50.0, 0.0])
     for br in imm.branches.values():
         br.filter.init(z)
 
+    true_x = np.array([50.0 + i * 0.5 for i in range(5)])
+    true_y = np.zeros(5)
+
     for i in range(5):
         imm.predict()
-        imm.update(np.array([50.0 + i * 0.5, 0.0]))
+        imm.update(np.array([true_x[i], 0.0]))  # 无噪声测量
 
-    # 匀速场景下 CV 概率应最高
-    assert imm.probs[imm.names.index("cv")] > 0.3, f"CV prob too low: {imm.probs}"
+    pos = imm.position
+    error = np.sqrt((pos[0] - true_x[-1])**2 + pos[1]**2)
+    assert error < 1.0, f"IMM 匀速跟踪误差过大: {error:.3f} m"

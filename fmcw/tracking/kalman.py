@@ -61,11 +61,16 @@ class KalmanFilter:
         self.x = np.zeros(dim_x)
         self.P = np.eye(dim_x) * 100.0
 
-    def init(self, z: np.ndarray):
+    def init(self, z: np.ndarray, velocity: Optional[np.ndarray] = None):
         """Initialize filter with first measurement."""
         self.x[0] = z[0]
         self.x[1] = z[1]
+        # Velocity
         self.x[2:] = 0.0
+        if velocity is not None:
+            r = np.linalg.norm(z)
+            vx, vy = velocity*z[0:2]/r
+            self.x[2:4] = np.array([vx, vy])
 
     def predict(self) -> np.ndarray:
         """Predict step: x = F @ x, P = F @ P @ F.T + Q."""
@@ -131,12 +136,17 @@ class ExtendedKalmanFilter:
         self.x = np.zeros(dim_x)
         self.P = np.eye(dim_x) * 100.0
 
-    def init(self, z: np.ndarray):
+    def init(self, z: np.ndarray, velocity: Optional[np.ndarray] = None):
         """Initialize from [range, angle] measurement."""
         r, th = z[0], np.deg2rad(z[1])
         self.x[0] = r * np.cos(th)
         self.x[1] = r * np.sin(th)
+        # Velocity
         self.x[2:] = 0.0
+        if velocity is not None:
+            r = np.linalg.norm(z)
+            vx, vy = velocity*z[0:2]/r
+            self.x[2:4] = np.array([vx, vy])
 
     def hx(self, x: np.ndarray) -> np.ndarray:
         """Observation function: state → [range, angle]."""
@@ -145,17 +155,21 @@ class ExtendedKalmanFilter:
         return np.array([r, np.rad2deg(th)])
 
     def H_jacobian(self, x: np.ndarray) -> np.ndarray:
-        """Jacobian of hx at state x. Only depends on first 2 dims."""
+        """Jacobian of hx at state x. Only depends on first 2 dims.
+
+        Note: hx returns angle in degrees, so H is in [unitless, deg/m].
+        """
         dim_x = len(x)
         r2 = x[0]**2 + x[1]**2
         r = np.sqrt(r2)
         if r < 1e-6:
             return np.zeros((2, dim_x))
+        rad2deg = 180.0 / np.pi
         H = np.zeros((2, dim_x))
         H[0, 0] = x[0] / r
         H[0, 1] = x[1] / r
-        H[1, 0] = -x[1] / r2
-        H[1, 1] = x[0] / r2
+        H[1, 0] = -x[1] / r2 * rad2deg   # degrees/m
+        H[1, 1] = x[0] / r2 * rad2deg    # degrees/m
         return H
 
     def predict(self) -> np.ndarray:
@@ -248,17 +262,33 @@ class UnscentedKalmanFilter:
         self._last_innovation = np.zeros(self.m)
         self._last_S = np.eye(self.m)
 
-    def init(self, z: np.ndarray):
+    def init(self, z: np.ndarray, velocity: Optional[np.ndarray] = None):
         """Initialize from [range, angle] measurement."""
         r, th = z[0], np.deg2rad(z[1])
         self.x[0] = r * np.cos(th)
         self.x[1] = r * np.sin(th)
+        # Velocity
         self.x[2:] = 0.0
+        if velocity is not None:
+            r = np.linalg.norm(z)
+            vx, vy = velocity*z[0:2]/r
+            self.x[2:4] = np.array([vx, vy])
 
     def sigma_points(self) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Generate 2n+1 sigma points."""
+        """Generate 2n+1 sigma points with adaptive regularization."""
         n = self.n
-        L = cholesky((n + self.lam) * self.P, lower=True)
+        P = (self.P + self.P.T) / 2
+        # 直接正则化 P 本身，再乘以 (n+lam)
+        scaled_P = (n + self.lam) * P
+        for i in range(10):
+            try:
+                L = cholesky(scaled_P, lower=True)
+                break
+            except np.linalg.LinAlgError:
+                reg = 10.0 ** (-8 + i)
+                scaled_P += np.eye(n) * reg
+        else:
+            L = np.diag(np.sqrt(np.maximum(np.diag(scaled_P), 1e-8)))
 
         sigmas = np.zeros((2 * n + 1, n))
         sigmas[0] = self.x

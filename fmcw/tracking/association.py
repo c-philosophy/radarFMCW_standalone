@@ -171,6 +171,8 @@ class GNN:
         track_states: List[TrackState],
         measurements: np.ndarray,
         velocities: Optional[np.ndarray] = None,
+        delta_factor_pos: float = 1.0,
+        delta_factor_vel: float = 1.0,
     ) -> Tuple[np.ndarray, List, List[int]]:
         n_tracks = len(track_states)
         n_meas = len(measurements)
@@ -187,15 +189,17 @@ class GNN:
         for i in range(n_tracks):
             for j in range(n_meas):
                 if self.use_mahalanobis:
-                    d = mahalanobis_distance(measurements[j], track_states[i])
+                    d_pos = mahalanobis_distance(measurements[j], track_states[i])
                 else:
-                    d = float(np.linalg.norm(measurements[j] - track_states[i].position))
+                    d_pos = float(np.linalg.norm(measurements[j] - track_states[i].position))
 
                 if self.use_velocity_gating and velocities is not None:
                     if not velocity_gate(velocities[j], track_states[i], self.gate_velocity):
-                        d = 1e10
-
-                cost[i, j] = d if d < self.gate else 1e10
+                        d_vel = 1e10
+                    else:
+                        d_vel = float(np.linalg.norm(velocities[j] - track_states[i].velocity))
+                # Cost TODO: 成本函数计算并未按照`tracking_优化方向讨论.md`中的公式计算，待确认
+                cost[i, j] = delta_factor_pos * d_pos + delta_factor_vel * (d_vel if self.use_velocity_gating  else 0.0)
 
         # Hungarian algorithm
         row_ind, col_ind = linear_sum_assignment(cost)

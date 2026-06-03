@@ -26,13 +26,13 @@ radar = RadarParams(fc=79e9, B=0.5e9, Tc=40e-6,
 # Multi-target scenario
 scene = SceneConfig(
     type="multi_target",
-    num_frames=100,
+    num_frames=50,
     frame_interval=0.1,
     snr_db=20.0,
     targets=[
-        TargetSpec(id=1, initial_range=50, initial_velocity=-10, initial_angle=45,
+        TargetSpec(id=1, initial_range=15, initial_velocity=10, initial_angle=15,
                    motion=MotionModel(motion="constant_velocity")),
-        TargetSpec(id=2, initial_range=25, initial_velocity=-5, initial_angle=-45,
+        TargetSpec(id=2, initial_range=10, initial_velocity=10, initial_angle=-30,
                    motion=MotionModel(motion="constant_velocity")),
     ],
 )
@@ -44,6 +44,15 @@ pipeline_cfg.visualization.update_hz = 2
 pipeline_cfg.visualization.panels = ["rd_map", "ra_map", "trajectory", "diagnostic"]
 pipeline_cfg.tracking.filter = "ekf"
 pipeline_cfg.detection.cfar_algorithm = "ca_cfar"
+pipeline_cfg.estimation.doa_method = "fft"
+enable_imm = True
+if enable_imm:
+    pipeline_cfg.tracking.filter = "ekf"
+    pipeline_cfg.tracking.enable_imm = True
+    pipeline_cfg.tracking.imm_models = ("cv", "ca", "ctra")
+    pipeline_cfg.tracking.use_mahalanobis = True
+    pipeline_cfg.tracking.use_velocity_gating = False
+    pipeline_cfg.tracking.process_noise = 0.5
 
 print(f"Backend: {pipeline_cfg.visualization.backend}")
 print(f"Targets: {len(scene.targets)}, Frames: {scene.num_frames}")

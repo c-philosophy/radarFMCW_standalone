@@ -81,6 +81,14 @@ class RadarPipeline:
             dt=self._trk_cfg.dt,
             confirm_threshold=self._trk_cfg.init_threshold,
             delete_threshold=self._trk_cfg.coast_threshold,
+            enable_imm=self._trk_cfg.enable_imm,
+            imm_models=self._trk_cfg.imm_models,
+            use_mahalanobis=self._trk_cfg.use_mahalanobis,
+            gate_mahalanobis=self._trk_cfg.gate_mahalanobis,
+            use_velocity_gating=self._trk_cfg.use_velocity_gating,
+            gate_velocity=self._trk_cfg.gate_velocity,
+            gate=self._trk_cfg.gate_mahalanobis,
+            process_noise=self._trk_cfg.process_noise,
         )
 
         viz_cfg = self.pipeline_config.visualization
@@ -232,7 +240,7 @@ class RadarPipeline:
                     "ground_truth": targets,
                 }
                 self._viz.update(frame_data)
-                self._viz.refresh()  # 处理 Qt 事件，触发定时器渲染当前帧
+                self._viz.refresh()  # 若使用pyqtgraph，处理 Qt 事件，触发定时器渲染当前帧
 
             # Collect results
             all_results.append(result)

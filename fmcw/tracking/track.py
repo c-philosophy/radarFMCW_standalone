@@ -23,7 +23,8 @@ class Track:
     track_id: int
     status: TrackStatus = TrackStatus.TENTATIVE
     filter: Optional[object] = None       # KalmanFilter (or other)
-    history: List[np.ndarray] = field(default_factory=list)  # [(x, y), ...]
+    meas_history: List[np.ndarray] = field(default_factory=list) # [(range, angle, velocity), ...]
+    history: List[np.ndarray] = field(default_factory=list)      # [(x, y), ...]
     hits: int = 0
     misses: int = 0
     age: int = 0
@@ -59,11 +60,11 @@ class TrackManager:
         self.tracks: Dict[int, Track] = {}
         self._next_id = 0
 
-    def initiate(self, measurement: np.ndarray) -> Track:
+    def initiate(self, measurement: np.ndarray, velocity: Optional[np.ndarray] = None) -> Track:
         """Create a new tentative track from an unassociated measurement.
 
         Args:
-            measurement: (2,) or (4,) array [x, y] or [range, angle].
+            measurement: (2,) or (4,) array [x, y] or [range, angle, vx, vy, ax, ay].
 
         Returns:
             The new Track.
@@ -74,10 +75,13 @@ class TrackManager:
         if self.tracker_factory is not None:
             kf = self.tracker_factory()
             if hasattr(kf, 'init'):
-                kf.init(measurement)
+                kf.init(measurement, velocity)
             track.filter = kf
-
-        track.history.append(measurement.copy())
+        # Add measurement to history
+        track.meas_history.append(measurement.copy()) 
+        cur_state = track.filter.state.copy() # (x, y, vx, vy, ax, ay)
+        track.history.append(cur_state[0:2])
+        
         self.tracks[track.track_id] = track
         return track
 
@@ -91,7 +95,12 @@ class TrackManager:
         """Update track with associated measurement."""
         if track.filter is not None:
             track.filter.update(measurement)
-        track.history.append(measurement.copy())
+            
+        # Add measurement to history
+        track.meas_history.append(measurement.copy()) 
+        cur_state = track.filter.state.copy() # (x, y, vx, vy, ax, ay)
+        track.history.append(cur_state[0:2])
+
         track.hits += 1
         track.total_hits += 1
         track.misses = 0

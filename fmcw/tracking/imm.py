@@ -147,11 +147,15 @@ class InteractingMultipleModel:
 
     # ── 公共接口 ──────────────────────────────────────────────────────
 
-    def init(self, z: np.ndarray):
-        """从首次测量初始化所有分支。"""
+    def init(self, z: np.ndarray, velocity: Optional[np.ndarray] = None):
+        """从首次测量初始化所有分支。
+
+        Args:
+            z: [range, angle] 极坐标测量值。
+        """
         for br in self.branches.values():
             if hasattr(br.filter, 'init'):
-                br.filter.init(z)
+                br.filter.init(z, velocity)
 
     def predict(self):
         """混合 → 各分支预测。"""
@@ -170,42 +174,69 @@ class InteractingMultipleModel:
             br = self.branches[name]
             br.filter.update(z)
 
-            # 从滤波器读取缓存的创新和 S 矩阵
-            if hasattr(br.filter, '_last_innovation'):
-                innovation = br.filter._last_innovation
-                S = br.filter._last_S
-                dim = len(innovation)
+            # 统一使用 EKF 线性化公式计算似然，避免 UKF vs EKF 的系统性偏差
+            # S = H·P·Hᵀ + R, 其中 H 为 h(x) 在预测状态处的雅可比
+            x_pred = br.filter.x  # 更新后的状态近似为预测状态
+            px, py = x_pred[0], x_pred[1]
+            r = np.sqrt(px**2 + py**2)
+
+            if r > 1e-6:
+                # 构建 2×dim_x 雅可比（角度单位为度，与 hx 输出一致）
+                dim_x = len(x_pred)
+                rad2deg = 180.0 / np.pi
+                H = np.zeros((2, dim_x))
+                H[0, 0] = px / r
+                H[0, 1] = py / r
+                H[1, 0] = -py / (r**2) * rad2deg   # deg/m
+                H[1, 1] = px / (r**2) * rad2deg    # deg/m
+
+                # 预测测量
+                z_pred = np.array([r, np.rad2deg(np.arctan2(py, px))])
+                innovation = z - z_pred
+                # 角度 wrapping
+                while innovation[1] > 180: innovation[1] -= 360
+                while innovation[1] < -180: innovation[1] += 360
+
+                S = H @ br.filter.P @ H.T + br.filter.R
+                dim = 2
                 det = np.linalg.det(S)
-                if det > 0:
+                if det > 1e-60:
                     try:
                         mahal = innovation @ np.linalg.solve(S, innovation)
-                        likelihoods[i] = np.exp(-0.5 * mahal) / np.sqrt(
-                            (2 * np.pi)**dim * max(det, 1e-30))
+                        log_likelihood = -0.5 * (mahal + dim * np.log(2 * np.pi) + np.log(det))
+                        likelihoods[i] = np.exp(np.clip(log_likelihood, -100, 0))
                     except np.linalg.LinAlgError:
-                        likelihoods[i] = 1e-10
+                        likelihoods[i] = 1e-30
                 else:
-                    likelihoods[i] = 1e-10
+                    likelihoods[i] = 1e-30
             else:
-                likelihoods[i] = 1.0
+                likelihoods[i] = 1e-30
 
-        # 概率更新
+        # 概率更新（带防下溢保护）
         mixed_probs = self.probs @ self.trans_matrix.T
         self.probs = likelihoods * mixed_probs
         prob_sum = self.probs.sum()
-        self.probs = self.probs / (prob_sum + 1e-30)
+        if prob_sum < 1e-300:
+            self.probs = np.full(self.n, 1.0 / self.n)
+        else:
+            self.probs = self.probs / prob_sum
 
     @property
     def position(self) -> np.ndarray:
         """融合后的 [x, y] 位置。"""
-        x_fused = np.zeros(2)
+        pos_fused = np.zeros(2)   # [x, y]
         for i, name in enumerate(self.names):
             br = self.branches[name]
-            x_fused += self.probs[i] * br.filter.position
-        return x_fused
-
+            pos_fused += self.probs[i] * br.filter.position
+        return pos_fused
     @property
     def state(self) -> np.ndarray:
-        return self.position.copy()
+        # return self.position.copy()
+        x_fused = np.zeros(4)   # [x, y, vx, vy]
+        for i, name in enumerate(self.names):
+            br = self.branches[name]
+            x_fused += self.probs[i] * br.filter.x[:4]  # 取前4维 [x, y, vx, vy]
+        return x_fused
 
     @property
     def velocity(self) -> np.ndarray:
@@ -258,6 +289,10 @@ class InteractingMultipleModel:
 
             self.branches[name_i].filter.x = x_mixed
             self.branches[name_i].filter.P = P_mixed
+            # 协方差正则化：确保对称半正定
+            P_sym = (P_mixed + P_mixed.T) / 2
+            P_sym += np.eye(len(P_sym)) * 1e-6
+            self.branches[name_i].filter.P = P_sym
 
         self.probs = mu_prior
 

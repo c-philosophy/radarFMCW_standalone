@@ -43,6 +43,14 @@ pipeline_cfg.detection.cfar_algorithm = "ca_cfar"  # Try CA-CFAR
 # pipeline_cfg.detection.alpha = 6.0
 pipeline_cfg.tracking.filter = "ekf"               # Use EKF for radar measurements
 pipeline_cfg.estimation.doa_method = "fft"
+enable_imm = True
+if enable_imm:
+    pipeline_cfg.tracking.filter = "ekf"
+    pipeline_cfg.tracking.enable_imm = True
+    pipeline_cfg.tracking.imm_models = ("cv", "ca", "ctra")
+    pipeline_cfg.tracking.use_mahalanobis = True
+    pipeline_cfg.tracking.use_velocity_gating = False
+    pipeline_cfg.tracking.process_noise = 0.5
  
 print(f"CFAR: {pipeline_cfg.detection.cfar_algorithm}")
 print(f"Tracker: {pipeline_cfg.tracking.filter}")
@@ -50,8 +58,10 @@ print(f"Targets: {len(scene.targets)} targets, {scene.num_frames} frames")
 # 打印雷达的最大无模糊距离、速度以及距离分辨率、速度分辨率
 print(f"Max range: {radar.max_range:.2f} m")
 print(f"Max velocity: {radar.max_velocity:.2f} m/s")
+print(f"Max angle: {radar.max_angle_rad*180/np.pi:.2f} deg")
 print(f"Range resolution: {radar.range_resolution:.2f} m")
 print(f"Velocity resolution: {radar.velocity_resolution:.2f} m/s")
+# print(f"Angle resolution: {radar.angle_resolution*180/np.pi:.2f} deg")
 
 pipe = RadarPipeline(radar, pipeline_cfg, scene)
 
