@@ -192,7 +192,6 @@ class PyQtGraphVisualizer(BaseVisualizer):
     def _setup_trajectory_panel(self, row: int, col: int):
         """Setup XY trajectory panel."""
         import pyqtgraph as pg
-        from pyqtgraph.Qt import QtCore
 
         plot = self._win.addPlot(row=row, col=col)
         plot.setTitle("Tracking Trajectories")
@@ -208,16 +207,14 @@ class PyQtGraphVisualizer(BaseVisualizer):
         legend.setPen(pg.mkPen("gray", width=1))
         legend.setBrush(pg.mkBrush(245, 245, 245, 220))
 
-        # Ground truth dashed line
-        gt_line = plot.plot([], [], pen=pg.mkPen("k", width=1.5, style=QtCore.Qt.DashLine),
-                            name="Ground Truth")
-
-        # Empty dict of plot items, keyed by track_id
+        # Empty dict of plot items, keyed by track_id / gt_index
         self._panels["trajectory"] = {
             "plot": plot,
-            "lines": {},      # track_id -> PlotDataItem
-            "gt_line": gt_line,
+            "lines": {},       # track_id -> PlotDataItem
+            "gt_lines": {},    # gt_index -> PlotDataItem (每个目标独立GT轨迹)
         }
+        # 真值历史：{gt_index: [[x,y], ...]}
+        self._gt_history: Dict[int, list] = {}
 
     def _setup_diagnostic_panel(self, row: int, col: int):
         """Setup diagnostic metrics panel."""
@@ -257,9 +254,9 @@ class PyQtGraphVisualizer(BaseVisualizer):
         self._det_label = QtWidgets.QLabel()
         self._det_label.setTextFormat(QtCore.Qt.RichText)
         self._det_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
-        # 边框样式：左侧蓝色竖条 + 浅灰底色，与上方子图形成视觉分隔
+        # 左边留白给标题缩进，右边不留白让表格贴齐边框
         self._det_label.setStyleSheet(
-            "padding: 10px; background: #FAFBFC;"
+            "padding: 8px 2px 8px 8px; background: #FAFBFC;"
             "border: 2px solid #C8CCD4; border-left: 4px solid #4472C4;"
             "border-radius: 4px;"
         )
@@ -282,7 +279,7 @@ class PyQtGraphVisualizer(BaseVisualizer):
         self._trk_label.setTextFormat(QtCore.Qt.RichText)
         self._trk_label.setAlignment(QtCore.Qt.AlignTop | QtCore.Qt.AlignLeft)
         self._trk_label.setStyleSheet(
-            "padding: 10px; background: #FAFBFC;"
+            "padding: 8px 2px 8px 8px; background: #FAFBFC;"
             "border: 2px solid #C8CCD4; border-left: 4px solid #2B579A;"
             "border-radius: 4px;"
         )
@@ -306,10 +303,10 @@ class PyQtGraphVisualizer(BaseVisualizer):
 
         if n_targets == 0:
             return (
-                "<div style='font-size:12px; font-weight:bold; color:#4472C4;"
-                " border-bottom:1px solid #C8CCD4; padding-bottom:4px;"
-                " margin-bottom:6px'>Target Detections</div>"
-                "<i style='color:gray'>No detections</i>"
+                "<div style='font-size:13px; font-weight:bold; color:#4472C4;"
+                " border-bottom:1px solid #C8CCD4; padding-bottom:3px;"
+                " margin-bottom:3px; padding-left:2px'>Target Detections</div>"
+                "<i style='color:gray; font-size:11px; padding-left:2px'>No detections</i>"
             )
 
         rows = []
@@ -319,41 +316,41 @@ class PyQtGraphVisualizer(BaseVisualizer):
             bg = "#FFFFFF" if i % 2 == 1 else "#F0F3F7"
             rows.append(
                 f"<tr style='background:{bg}'>"
-                f"<td style='text-align:center; width:6%'>{i}</td>"
-                f"<td style='text-align:right; width:14%'>{e.range:.2f}</td>"
-                f"<td style='text-align:right; width:14%'>{e.velocity:+.2f}</td>"
-                f"<td style='text-align:right; width:14%'>{e.angle:+.1f}</td>"
-                f"<td style='text-align:right; width:14%'>{x:.2f}</td>"
-                f"<td style='text-align:right; width:14%'>{y:.2f}</td>"
-                f"<td style='text-align:right; width:14%'>{e.snr_db:.1f}</td>"
+                f"<td style='text-align:center; width:6%; font-size:11px'>{i}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{e.range:.2f}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{e.velocity:+.2f}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{e.angle:+.1f}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{x:.2f}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{y:.2f}</td>"
+                f"<td style='text-align:right; width:19%; font-size:11px'>{e.snr_db:.1f}</td>"
                 f"</tr>"
             )
 
         header = (
             "<tr style='background:#4472C4; color:white; font-weight:bold;"
-            " font-size:10px'>"
+            " font-size:11px'>"
             "<th style='width:6%'>#</th>"
-            "<th style='width:14%'>Range<br>(m)</th>"
-            "<th style='width:14%'>Vel<br>(m/s)</th>"
-            "<th style='width:14%'>Angle<br>(&deg;)</th>"
-            "<th style='width:14%'>X<br>(m)</th>"
-            "<th style='width:14%'>Y<br>(m)</th>"
-            "<th style='width:14%'>SNR<br>(dB)</th></tr>"
+            "<th style='width:15%'>Range<br>(m)</th>"
+            "<th style='width:15%'>Vel<br>(m/s)</th>"
+            "<th style='width:15%'>Angle<br>(&deg;)</th>"
+            "<th style='width:15%'>X<br>(m)</th>"
+            "<th style='width:15%'>Y<br>(m)</th>"
+            "<th style='width:19%'>SNR<br>(dB)</th></tr>"
         )
 
         title = (
-            f"<div style='font-size:12px; font-weight:bold; color:#4472C4;"
-            f" border-bottom:1px solid #C8CCD4; padding-bottom:4px;"
-            f" margin-bottom:6px'>"
+            f"<div style='font-size:13px; font-weight:bold; color:#4472C4;"
+            f" border-bottom:1px solid #C8CCD4; padding-bottom:3px;"
+            f" margin-bottom:3px'>"
             f"Target Detections"
-            f"<span style='color:gray; font-weight:normal; font-size:10px'>"
+            f"<span style='color:gray; font-weight:normal; font-size:11px'>"
             f" &mdash; {n_targets} target(s)</span></div>"
         )
 
         return (
             f"{title}"
-            f"<table border='0' cellpadding='4' cellspacing='0'"
-            f" style='font-size:10px; width:100%'>"
+            f"<table border='0' cellpadding='2' cellspacing='0'"
+            f" style='font-size:11px; width:100%'>"
             f"{header}{''.join(rows)}</table>"
         )
 
@@ -364,10 +361,10 @@ class PyQtGraphVisualizer(BaseVisualizer):
 
         if n_tracks == 0:
             return (
-                "<div style='font-size:12px; font-weight:bold; color:#2B579A;"
-                " border-bottom:1px solid #C8CCD4; padding-bottom:4px;"
-                " margin-bottom:6px'>Track Status</div>"
-                "<i style='color:gray'>No tracks</i>"
+                "<div style='font-size:13px; font-weight:bold; color:#2B579A;"
+                " border-bottom:1px solid #C8CCD4; padding-bottom:3px;"
+                " margin-bottom:3px; padding-left:2px'>Track Status</div>"
+                "<i style='color:gray; font-size:11px; padding-left:2px'>No tracks</i>"
             )
 
         # 状态颜色
@@ -406,27 +403,27 @@ class PyQtGraphVisualizer(BaseVisualizer):
 
             rows.append(
                 f"<tr style='background:{bg}'>"
-                f"<td style='text-align:center; width:8%'>{t.track_id}</td>"
+                f"<td style='text-align:center; width:8%; font-size:11px'>{t.track_id}</td>"
                 f"<td style='text-align:center; width:16%; color:{color};"
-                f" font-weight:bold'>{status}</td>"
-                f"<td style='text-align:right; width:14%'>{x_str}</td>"
-                f"<td style='text-align:right; width:14%'>{y_str}</td>"
-                f"<td style='text-align:right; width:14%'>{vx_str}</td>"
-                f"<td style='text-align:right; width:14%'>{vy_str}</td>"
-                f"<td style='text-align:center; width:10%'>{t.age}</td>"
+                f" font-weight:bold; font-size:11px'>{status}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{x_str}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{y_str}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{vx_str}</td>"
+                f"<td style='text-align:right; width:15%; font-size:11px'>{vy_str}</td>"
+                f"<td style='text-align:center; width:16%; font-size:11px'>{t.age}</td>"
                 f"</tr>"
             )
 
         header = (
             "<tr style='background:#2B579A; color:white; font-weight:bold;"
-            " font-size:10px'>"
+            " font-size:11px'>"
             "<th style='width:8%'>ID</th>"
             "<th style='width:16%'>Status</th>"
-            "<th style='width:14%'>X<br>(m)</th>"
-            "<th style='width:14%'>Y<br>(m)</th>"
-            "<th style='width:14%'>Vx<br>(m/s)</th>"
-            "<th style='width:14%'>Vy<br>(m/s)</th>"
-            "<th style='width:10%'>Age</th></tr>"
+            "<th style='width:15%'>X<br>(m)</th>"
+            "<th style='width:15%'>Y<br>(m)</th>"
+            "<th style='width:15%'>Vx<br>(m/s)</th>"
+            "<th style='width:15%'>Vy<br>(m/s)</th>"
+            "<th style='width:16%'>Age</th></tr>"
         )
 
         n_confirmed = sum(
@@ -436,24 +433,24 @@ class PyQtGraphVisualizer(BaseVisualizer):
         n_tentative = n_tracks - n_confirmed
 
         title = (
-            f"<div style='font-size:12px; font-weight:bold; color:#2B579A;"
-            f" border-bottom:1px solid #C8CCD4; padding-bottom:4px;"
-            f" margin-bottom:6px'>"
+            f"<div style='font-size:13px; font-weight:bold; color:#2B579A;"
+            f" border-bottom:1px solid #C8CCD4; padding-bottom:3px;"
+            f" margin-bottom:3px'>"
             f"Track Status"
-            f"<span style='color:gray; font-weight:normal; font-size:10px'>"
+            f"<span style='color:gray; font-weight:normal; font-size:11px'>"
             f" &mdash; {n_tracks} track(s)"
         )
 
         if n_confirmed > 0:
             title += (
-                f"<span style='color:#228B22; font-weight:bold; font-size:10px'>"
+                f"<span style='color:#228B22; font-weight:bold; font-size:11px'>"
                 f" ({n_confirmed} confirmed</span>"
-                f"<span style='color:gray; font-weight:normal; font-size:10px'>"
+                f"<span style='color:gray; font-weight:normal; font-size:11px'>"
                 f", {n_tentative} tentative)</span>"
             )
         else:
             title += (
-                f"<span style='color:gray; font-weight:normal; font-size:10px'>"
+                f"<span style='color:gray; font-weight:normal; font-size:11px'>"
                 f", {n_tentative} tentative</span>"
             )
 
@@ -461,8 +458,8 @@ class PyQtGraphVisualizer(BaseVisualizer):
 
         return (
             f"{title}"
-            f"<table border='0' cellpadding='4' cellspacing='0'"
-            f" style='font-size:10px; width:100%'>"
+            f"<table border='0' cellpadding='2' cellspacing='0'"
+            f" style='font-size:11px; width:100%'>"
             f"{header}{''.join(rows)}</table>"
         )
 
@@ -554,7 +551,6 @@ class PyQtGraphVisualizer(BaseVisualizer):
         p = self._panels["trajectory"]
         plot = p["plot"]
         lines = p["lines"]
-        gt_line = p["gt_line"]
 
         # Track IDs currently displayed
         displayed = set(lines.keys())
@@ -591,19 +587,45 @@ class PyQtGraphVisualizer(BaseVisualizer):
             plot.removeItem(lines[tid])
             del lines[tid]
 
-        # 更新真值轨迹（极坐标 → 笛卡尔坐标）
-        if ground_truth and gt_line is not None:
-            gt_xy = []
-            for gt in ground_truth:
+        # 更新真值轨迹（每个目标独立累积历史 → 各自独立的虚线）
+        gt_lines = p["gt_lines"]
+        if ground_truth:
+            current_gt_ids = set()
+            for i, gt in enumerate(ground_truth):
                 r = gt.range if hasattr(gt, 'range') else gt[0]
                 a = gt.angle if hasattr(gt, 'angle') else gt[2]
                 x = r * np.cos(np.deg2rad(a))
                 y = r * np.sin(np.deg2rad(a))
-                gt_xy.append([x, y])
-            gt_pts = np.array(gt_xy)
-            gt_line.setData(gt_pts[:, 0], gt_pts[:, 1])
-        elif gt_line is not None:
-            gt_line.setData([], [])
+
+                current_gt_ids.add(i)
+                if i not in self._gt_history:
+                    self._gt_history[i] = []
+                self._gt_history[i].append([x, y])
+
+                # 创建或更新 GT 线
+                if i not in gt_lines:
+                    import pyqtgraph as pg
+                    from pyqtgraph.Qt import QtCore
+                    gt_lines[i] = plot.plot(
+                        [], [], pen=pg.mkPen("k", width=1.5, style=QtCore.Qt.DashLine),
+                        name=f"GT-{i}",
+                    )
+                hist = np.array(self._gt_history[i])
+                gt_lines[i].setData(hist[:, 0], hist[:, 1])
+
+            # 清理已消失的目标
+            for gt_id in list(gt_lines.keys()):
+                if gt_id not in current_gt_ids:
+                    plot.removeItem(gt_lines[gt_id])
+                    del gt_lines[gt_id]
+                    if gt_id in self._gt_history:
+                        del self._gt_history[gt_id]
+        else:
+            # 无真值时清理所有 GT 线
+            for gt_id in list(gt_lines.keys()):
+                plot.removeItem(gt_lines[gt_id])
+            gt_lines.clear()
+            self._gt_history.clear()
 
     def _update_diagnostic(self, tracks, estimates):
         """Update diagnostic panel with metrics history."""

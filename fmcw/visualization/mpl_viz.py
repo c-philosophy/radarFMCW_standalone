@@ -78,6 +78,8 @@ class MatplotlibVisualizer(BaseVisualizer):
         self._trk_slider = None
         self._det_slider_ax = None
         self._trk_slider_ax = None
+        # 真值历史：{gt_index: [[x,y], ...]}
+        self._gt_history: Dict[int, list] = {}
 
     def setup(self, radar_params, scene_config=None):
         """Create the 6-panel figure (3×2 layout，带滑动条)。"""
@@ -149,20 +151,31 @@ class MatplotlibVisualizer(BaseVisualizer):
 
         # Trajectory
         if "trajectory" in self.axes:
-            gt_positions = None
+            gt_histories = None
             if ground_truth:
-                gt_positions = []
-                for gt in ground_truth:
+                current_gt_ids = set()
+                for i, gt in enumerate(ground_truth):
                     r = gt.range if hasattr(gt, 'range') else gt[0]
                     a = gt.angle if hasattr(gt, 'angle') else gt[2]
                     x = r * np.cos(np.deg2rad(a))
                     y = r * np.sin(np.deg2rad(a))
-                    gt_positions.append([x, y])
+                    current_gt_ids.add(i)
+                    if i not in self._gt_history:
+                        self._gt_history[i] = []
+                    self._gt_history[i].append([x, y])
+                # 清理已消失目标
+                for gt_id in list(self._gt_history.keys()):
+                    if gt_id not in current_gt_ids:
+                        del self._gt_history[gt_id]
+                # 转换为 per-target history 列表
+                gt_histories = list(self._gt_history.values())
+            else:
+                self._gt_history.clear()
 
             draw_trajectory(
                 self.axes["trajectory"],
                 tracks=tracks,
-                ground_truth=gt_positions,
+                ground_truth=gt_histories,
             )
 
         # Diagnostic

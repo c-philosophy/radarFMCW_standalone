@@ -165,9 +165,17 @@ def draw_trajectory(
                         markersize=6, label=f"T{track.track_id}")
 
     if ground_truth:
-        gt = np.array(ground_truth)
-        if gt.ndim == 2 and gt.shape[1] >= 2:
-            ax.plot(gt[:, 0], gt[:, 1], "k--", linewidth=1.5, label="Ground Truth")
+        # 每个目标的 GT 历史独立绘制虚线，而非跨目标连线
+        for i, gt_hist in enumerate(ground_truth):
+            if not gt_hist:
+                continue
+            gt_arr = np.array(gt_hist)
+            if gt_arr.ndim == 2 and gt_arr.shape[0] >= 2:
+                ax.plot(gt_arr[:, 0], gt_arr[:, 1], "k--", linewidth=1.5,
+                        markersize=3, marker=".", label="Ground Truth" if i == 0 else None)
+            elif gt_arr.ndim == 2 and gt_arr.shape[0] == 1:
+                ax.plot(gt_arr[0, 0], gt_arr[0, 1], "ko", markersize=5,
+                        label="Ground Truth" if i == 0 else None)
 
     if tracks or ground_truth:
         ax.legend(loc="upper right", fontsize=7)
@@ -235,7 +243,7 @@ def draw_detection_table(ax, estimates, scroll_offset=0, max_visible=MAX_VISIBLE
     ax.set_yticks([])
     ax.set_facecolor("#FAFBFC")
     for spine in ax.spines.values():
-        spine.set_visible(True)
+        spine.set_visible(False)    # 隐藏边框
         spine.set_color("#B0B8C4")
         spine.set_linewidth(1.8)
         # 调整 spine 高度，确保与表格内容对齐---不正确
@@ -316,7 +324,7 @@ def draw_tracking_table(ax, tracks, scroll_offset=0, max_visible=MAX_VISIBLE_ROW
     ax.set_yticks([])
     ax.set_facecolor("#FAFBFC")
     for spine in ax.spines.values():
-        spine.set_visible(True)
+        spine.set_visible(False) # 隐藏边框
         spine.set_color("#B0B8C4")
         spine.set_linewidth(1.8)
 
