@@ -10,7 +10,7 @@ import numpy as np
 from fmcw.config.schema import RadarParams, SceneConfig, PipelineConfig
 from fmcw.signal.scene import Scene
 from fmcw.processing.processor import FMCWProcessor
-from fmcw.detection.detector import DetectionPipeline
+from fmcw.detection.detector import DetectionPipeline, _group_estimates_3d
 from fmcw.estimation.estimator import ParameterEstimator
 from fmcw.tracking.multi_tracker import MultiTargetTracker
 from fmcw.visualization.factory import create_visualizer
@@ -191,9 +191,19 @@ class RadarPipeline:
                 s_rd=result.s_rd,
             )
             dt_est = (time.perf_counter() - t0) * 1000
-            
+
+            # 3D 峰值分组（方案 A1）：合并 FFT 旁瓣产生的相邻检测，
+            # 但保留同一 RD cell 不同角度的目标（角度多峰检测结果）
+            raw_count = len(estimates.targets)
+            if raw_count > 1:
+                grouped = _group_estimates_3d(
+                    estimates.targets, result.rd_map,
+                    angle_num=self.radar.angle_num,
+                )
+                estimates.targets = grouped
+
             if verbose:
-                print(f"Estimation: {len(estimates.targets)}")
+                print(f"Estimation: {raw_count} raw -> {len(estimates.targets)} grouped")
                 print(f"index | range (m) | vel (m/s) | angle (deg) | doppler bin | range bin | angle bin| amplitude | SNR")
                 for i, est in enumerate(estimates.targets):
                     print(f"{i} | {est.range:.2f} | {est.velocity:.2f} | {est.angle:.2f} | {est.doppler_bin} | {est.range_bin} | {est.angle_bin} | {est.amplitude:.2f} | {est.snr_db:.2f}")

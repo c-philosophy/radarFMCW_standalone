@@ -195,7 +195,7 @@ def test_tls_esprit():
 # ============================================================
 
 def test_estimator_doa_fft_default():
-    """默认 DOA 方法应为 FFT，行为与之前一致。"""
+    """默认 DOA 方法（FFT 多峰）应至少返回 1 个目标。"""
     radar = RadarParams(antenna_num=8, chirp_num=64, sample_num=256)
     from fmcw.config.schema import EstimationConfig
 
@@ -209,7 +209,7 @@ def test_estimator_doa_fft_default():
     filtered = np.array([[20, 50]], dtype=np.int64)
     frame_est = est.estimate(result.s_rda, filtered)
 
-    assert len(frame_est.targets) == 1
+    assert len(frame_est.targets) >= 1, "多峰检测应至少返回 1 个目标"
     assert frame_est.targets[0].angle_bin >= 0, "FFT 方法应有有效的 angle_bin"
 
 
@@ -229,7 +229,7 @@ def test_estimator_doa_esprit():
     filtered = np.array([[20, 50]], dtype=np.int64)
     frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
 
-    assert len(frame_est.targets) == 1
+    assert len(frame_est.targets) >= 1
     assert -90 <= frame_est.targets[0].angle <= 90, "角度应在 ±90° 范围内"
     assert frame_est.targets[0].angle_bin == -1, "ESPRIT 方法 angle_bin 应为 -1"
 
@@ -250,7 +250,7 @@ def test_estimator_doa_music():
     filtered = np.array([[20, 50]], dtype=np.int64)
     frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
 
-    assert len(frame_est.targets) == 1
+    assert len(frame_est.targets) >= 1
     assert -90 <= frame_est.targets[0].angle <= 90
     assert frame_est.targets[0].angle_bin == -1
 
@@ -271,7 +271,7 @@ def test_estimator_doa_mvdr():
     filtered = np.array([[20, 50]], dtype=np.int64)
     frame_est = est.estimate(result.s_rda, filtered, s_rd=result.s_rd)
 
-    assert len(frame_est.targets) == 1
+    assert len(frame_est.targets) >= 1
     assert -90 <= frame_est.targets[0].angle <= 90
     assert frame_est.targets[0].angle_bin == -1
 

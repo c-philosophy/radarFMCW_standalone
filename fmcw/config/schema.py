@@ -136,7 +136,10 @@ class EstimationConfig:
     doa_method: str = "fft"            # fft, esprit, music, mvdr
     n_sources: int = 1                 # Number of signal sources (for MUSIC/ESPRIT)
     angle_resolution: float = 0.1      # Angular grid spacing in deg (for MUSIC/MVDR)
-    scan_range: Tuple[float, float] = (-90.0, 90.0)  # Scan range (for MUSIC/MVDR)
+    scan_range: Tuple[float, float] = (-80.0, 80.0)  # Scan range (for MUSIC/MVDR), exclude endfire
+    doa_multi_peak: bool = True        # 启用角度多峰检测（同 RD 不同角度目标分辨）
+    doa_peak_threshold_db: float = 6.0 # 次峰相对主峰的门限 (dB)
+    doa_max_peaks: int = 3             # 每 RD cell 最多检测的角度峰数
 
 
 @dataclass

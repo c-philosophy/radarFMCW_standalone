@@ -2,24 +2,25 @@
 
 标准流程（推荐）：
     1. 全图 2D CFAR 滑动窗检测 — 统计正确，精确控制 Pfa
-    2. 峰值分组 (Peak Grouping) — 合并同一目标的相邻检测点
-       解决 FMCW 雷达 FFT 旁瓣导致的单个目标产生多个检测的问题
+    2. 角度多峰检测 — 对每个 RD cell 查多个角度峰（方案 A1）
+    3. 3D 峰值分组 — 在 (A, D, R) 空间合并 FFT 旁瓣
 
     - CA-CFAR: 向量化 uniform_filter 实现，O(n²)，~1-3 ms
     - OS/GO/SO-CFAR: CA 预筛 + 候选点精确验证的两级方案
 
-峰值门控模式（legacy，peak_finder 参数非 None 时启用）：
-    先用形态学滤波筛选候选点，再对候选点做 CFAR 验证。
-    该模式不执行峰值分组。
+峰值门控模式（legacy，peak_finder 参数非 None 时启用）
 """
 
-from typing import Optional
+from typing import Optional, List, TYPE_CHECKING
 import numpy as np
 from scipy.ndimage import label, generate_binary_structure
 
 from fmcw.core.registry import AlgorithmRegistry
 from .peak_finder import PeakFinder
 from .cfar import BaseCFAR
+
+if TYPE_CHECKING:
+    from fmcw.estimation.estimator import TargetEstimate
 
 
 def _peak_grouping(
@@ -67,6 +68,70 @@ def _peak_grouping(
     return grouped
 
 
+def _group_estimates_3d(
+    estimates: list,
+    rd_map: np.ndarray,
+    angle_num: int,
+    connectivity: int = 3,
+) -> list:
+    """3D (Angle, Doppler, Range) 峰值分组。
+
+    在角度多峰检测后，同一 RD cell 可能产生多个 TargetEstimate
+    （不同角度）。本函数在 (A, D, R) 三维空间中做连通域分析，
+    合并 FFT 旁瓣产生的相邻检测，保留每组的最大幅度代表。
+
+    Args:
+        estimates: List of TargetEstimate objects.
+        rd_map: 2D Range-Doppler 幅度图（用于取局部最大值时的参考）。
+        angle_num: 角度 bin 总数（用于确定 3D mask 尺寸）。
+        connectivity: 连通域结构 (1=6连通, 2=18连通, 3=26连通)。
+
+    Returns:
+        List of TargetEstimate（分组后）。
+    """
+    if len(estimates) <= 1:
+        return estimates
+
+    D, R = rd_map.shape
+    mask_3d = np.zeros((angle_num, D, R), dtype=bool)
+    est_by_bin = {}  # (a, d, r) → TargetEstimate
+
+    for est in estimates:
+        d = max(0, min(D - 1, est.doppler_bin))
+        r = max(0, min(R - 1, est.range_bin))
+        # 超分辨方法的 angle_bin = -1：从物理角度反算 bin 位置
+        if est.angle_bin >= 0:
+            a = est.angle_bin
+        else:
+            # sin(θ) = 2*(a - N/2)/N → a = N/2 + N*sin(θ)/2
+            sin_theta = np.sin(np.deg2rad(est.angle))
+            a = int(np.round(angle_num / 2 + angle_num * sin_theta / 2))
+        a = max(0, min(angle_num - 1, a))
+        mask_3d[a, d, r] = True
+        key = (a, d, r)
+        if key not in est_by_bin or est.amplitude > est_by_bin[key].amplitude:
+            est_by_bin[key] = est
+
+    structure = generate_binary_structure(3, connectivity)
+    labeled, n_groups = label(mask_3d, structure=structure)
+
+    grouped = []
+    for gid in range(1, n_groups + 1):
+        ga, gd, gr = np.where(labeled == gid)
+        # 每组取幅度最大的 TargetEstimate
+        best_amp = -1.0
+        best_est = None
+        for ai, di, ri in zip(ga, gd, gr):
+            key = (ai, di, ri)
+            if key in est_by_bin and est_by_bin[key].amplitude > best_amp:
+                best_amp = est_by_bin[key].amplitude
+                best_est = est_by_bin[key]
+        if best_est is not None:
+            grouped.append(best_est)
+
+    return grouped
+
+
 class DetectionPipeline:
     """CFAR 目标检测流水线。
 
@@ -89,7 +154,7 @@ class DetectionPipeline:
         self,
         cfar_algorithm: str = "ca_cfar",
         peak_finder: Optional[PeakFinder] = None,
-        enable_grouping: bool = True,
+        enable_grouping: bool = False,
     ):
         """初始化检测流水线。
 
