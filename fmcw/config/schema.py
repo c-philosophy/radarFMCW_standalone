@@ -203,3 +203,43 @@ class PipelineConfig:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
     persistence: PersistenceConfig = field(default_factory=PersistenceConfig)
+    evaluation: "EvalConfig" = field(default_factory=lambda: EvalConfig())
+
+
+# ============================================================
+# 评估配置（新增）
+# ============================================================
+
+@dataclass
+class EvalConfig:
+    """评估模块配置。"""
+    # ── 通用 ──
+    enabled: bool = True                        # 是否启用评估
+    output_dir: str = "eval_results"            # 评估报告输出目录
+    save_report: bool = True                    # 是否保存评估报告
+
+    # ── 信号处理评估 ──
+    signal_metrics: List[str] = field(default_factory=lambda: [
+        "range_rmse", "velocity_rmse", "angle_rmse",
+        "crlb_ratio", "resolution", "timing",
+    ])
+
+    # ── 检测评估 ──
+    detection_metrics: List[str] = field(default_factory=lambda: [
+        "pd", "pfa", "roc", "peak_grouping",
+    ])
+    detection_range_gate_m: float = 2.0         # 检测-真值距离门控 (m)
+    pfa_design: Optional[float] = None          # 设计 Pfa
+
+    # ── 跟踪评估 ──
+    tracking_metrics: List[str] = field(default_factory=lambda: [
+        "gospa", "mota", "motp", "idf1", "hota", "lifecycle",
+    ])
+    tracking_gate_m: float = 5.0                # 跟踪-真值关联门控 (m)
+    gospa_p: float = 2.0
+    gospa_c: float = 10.0
+    gospa_alpha: float = 2.0
+
+    # ── 基准测试 ──
+    benchmark_scenarios: List[str] = field(default_factory=list)
+    num_monte_carlo: int = 1

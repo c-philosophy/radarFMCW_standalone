@@ -130,6 +130,7 @@ class RadarPipeline:
         all_estimates = []
         all_tracks = []
         all_signals = []
+        all_detections = []
 
         # Setup visualization
         if self._viz:
@@ -256,6 +257,7 @@ class RadarPipeline:
             all_results.append(result)
             all_estimates.append(estimates)
             all_tracks.append(tracks)
+            all_detections.append(filtered)
 
         # Finalize
         t_total = time.perf_counter() - t_start
@@ -271,6 +273,7 @@ class RadarPipeline:
             "results": all_results,
             "estimates": all_estimates,
             "tracks": all_tracks,
+            "detections": all_detections,
         }
 
     def run_streaming(self):

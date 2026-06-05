@@ -30,10 +30,22 @@ scene = SceneConfig(
     frame_interval=0.1,
     snr_db=20.0,
     targets=[
-        TargetSpec(id=1, initial_range=15, initial_velocity=10, initial_angle=15,
+        TargetSpec(id=1, initial_range=15, initial_velocity=10, initial_angle=5,
                    motion=MotionModel(motion="constant_velocity")),
-        TargetSpec(id=2, initial_range=10, initial_velocity=10, initial_angle=-30,
+        # TargetSpec(id=2, initial_range=15, initial_velocity=10, initial_angle=-5,
+        #            motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=3, initial_range=20, initial_velocity=5, initial_angle=15,
+        #            motion=MotionModel(motion="constant_velocity")),
+        TargetSpec(id=4, initial_range=20, initial_velocity=10, initial_angle=-15,
                    motion=MotionModel(motion="constant_velocity")),
+        TargetSpec(id=5, initial_range=20, initial_velocity=10, initial_angle=15,
+                   motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=6, initial_range=20, initial_velocity=-8, initial_angle=45,
+        #            motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=7, initial_range=20, initial_velocity=8, initial_angle=-45,
+        #            motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=8, initial_range=10, initial_velocity=6, initial_angle=90,
+        #            motion=MotionModel(motion="constant_velocity")),
     ],
 )
 
@@ -42,10 +54,10 @@ pipeline_cfg = PipelineConfig()
 pipeline_cfg.visualization.backend = "pyqtgraph" # "mpl" or "pyqtgraph"
 pipeline_cfg.visualization.update_hz = 2
 pipeline_cfg.visualization.panels = ["rd_map", "ra_map", "trajectory", "diagnostic"]
-pipeline_cfg.tracking.filter = "ekf"
+pipeline_cfg.tracking.filter = "kf"
 pipeline_cfg.detection.cfar_algorithm = "ca_cfar"
-pipeline_cfg.estimation.doa_method = "fft"
-enable_imm = True
+pipeline_cfg.estimation.doa_method = "music"  # "music" / "esprit" / "mvdr"/ "fft"
+enable_imm = False
 if enable_imm:
     pipeline_cfg.tracking.filter = "ekf"
     pipeline_cfg.tracking.enable_imm = True
