@@ -12,7 +12,7 @@
 
 ## 项目简介
 
-**radarFMCW** 是一个 **FMCW 毫米波雷达全流程模块化仿真与信号处理框架**，它将毫米波雷达的完整信号处理链路——从基带信号仿真到目标检测与跟踪——拆解为独立、可插拔的模块，支持研究人员和工程师快速搭建雷达信号处理流水线、对比不同算法的效果。
+**radarFMCW** 是一个 **3D FMCW 毫米波雷达全流程模块化仿真与信号处理框架**，它将毫米波雷达的完整信号处理链路——从基带信号仿真到目标检测与跟踪——拆解为独立、可插拔的模块，支持研究人员和工程师快速搭建雷达信号处理流水线、对比不同算法的效果。
 
 ### 核心特性
 
@@ -26,17 +26,92 @@
 
 ---
 
-## 技术栈
+### 技术栈
 
 | 类别 | 技术 |
 |------|------|
-| 编程语言 | Python 3.8+ |
+| 编程语言 | Python 3.x |
 | 数值计算 | NumPy |
-| 科学计算 | SciPy（线性代数、信号处理、优化） |
+| 科学计算 | SciPy（线性代数、信号处理、优化、空间距离） |
 | 可视化 | Matplotlib、PyQtGraph（可选） |
-| GUI 框架 | PyQt5 / PySide6（可选，PyQtGraph 依赖） |
+| GUI 框架 | PyQt5 / PySide6（可选，pyqtgraph 依赖） |
 | 配置解析 | PyYAML |
+| 数据读取 | pandas（持久化模块加载 CSV 时使用） |
 | 测试框架 | pytest |
+
+### 架构概览图
+
+```mermaid
+graph LR
+    subgraph 配置层
+        CFG["config/<br/>YAML/JSON 配置"]
+        LOADER["config/loader.py<br/>配置加载与反序列化"]
+        SCHEMA["config/schema.py<br/>数据类定义"]
+    end
+
+    subgraph 核心框架层
+        CTX["core/context.py<br/>PipelineContext<br/>黑板数据共享"]
+        STAGE["core/stage.py<br/>Stage 处理节点"]
+        DAG["core/pipeline.py<br/>DAGPipeline<br/>拓扑排序执行"]
+        REG["core/registry.py<br/>AlgorithmRegistry<br/>策略模式注册"]
+    end
+
+    subgraph 信号生成层
+        WF["signal/waveform.py<br/>FMCW 波形参数"]
+        GEN["signal/generator.py<br/>IF 中频信号生成"]
+        SCENE["signal/scene.py<br/>多帧场景编排"]
+        IMP["signal/impairments.py<br/>IQ失衡/相位噪声"]
+        FLUC["signal/target_fluctuation.py<br/>Swerling 起伏模型"]
+    end
+
+    subgraph 信号处理层
+        RFFT["processing/range_fft.py"]
+        DFFT["processing/doppler_fft.py"]
+        AFFT["processing/angle_fft.py"]
+        PROC["processing/processor.py<br/>FMCWProcessor"]
+        SR["processing/super_resolution.py<br/>ESPRIT"]
+    end
+
+    subgraph 检测与估计层
+        PEAK["detection/peak_finder.py<br/>形态学峰值检测"]
+        CFAR["detection/cfar.py<br/>CA/OS/GO/SO CFAR"]
+        DET["detection/detector.py<br/>DetectionPipeline"]
+        EST["estimation/estimator.py<br/>参数估计"]
+        DOA["estimation/doa.py<br/>MUSIC/MVDR"]
+    end
+
+    subgraph 跟踪层
+        MM["tracking/motion_model.py<br/>CV/CA/CTRA 运动模型"]
+        KF["tracking/kalman.py<br/>KF/EKF/UKF"]
+        IMM["tracking/imm.py<br/>IMM 交互多模型"]
+        ASSOC["tracking/association.py<br/>NN/GNN/JPDA"]
+        TRACK["tracking/track.py<br/>航迹管理"]
+        MT["tracking/multi_tracker.py<br/>多目标跟踪器"]
+    end
+
+    subgraph 结果可视化+数据记录+性能评估
+        VIZ["visualization/<br/>mpl / pyqtgraph"]
+        IO["persistence/<br/>NPZ/CSV/JSONL"]
+        EVAL["evaluation/<br/>信号处理/检测/跟踪评估"]
+    end
+
+    subgraph 应用编排层
+        RP["pipeline/pipeline.py<br/>RadarPipeline<br/>全流程编排"]
+    end
+
+    CFG --> LOADER --> SCHEMA
+    RP --> CFG
+    RP --> SCENE --> GEN --> WF
+    RP --> PROC --> RFFT & DFFT & AFFT
+    RP --> DET --> PEAK & CFAR
+    RP --> EST --> DOA
+    RP --> MT --> KF & ASSOC & TRACK
+    RP --> VIZ
+    RP --> IO
+    RP --> EVAL
+    DET --> REG
+    MT --> REG
+```
 
 ---
 

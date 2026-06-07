@@ -32,14 +32,14 @@ scene = SceneConfig(
     targets=[
         TargetSpec(id=1, initial_range=15, initial_velocity=10, initial_angle=5,
                    motion=MotionModel(motion="constant_velocity")),
-        # TargetSpec(id=2, initial_range=15, initial_velocity=10, initial_angle=-5,
-        #            motion=MotionModel(motion="constant_velocity")),
+        TargetSpec(id=2, initial_range=25, initial_velocity=10, initial_angle=30,
+                   motion=MotionModel(motion="constant_velocity")),
         # TargetSpec(id=3, initial_range=20, initial_velocity=5, initial_angle=15,
         #            motion=MotionModel(motion="constant_velocity")),
-        TargetSpec(id=4, initial_range=20, initial_velocity=10, initial_angle=-15,
-                   motion=MotionModel(motion="constant_velocity")),
-        TargetSpec(id=5, initial_range=20, initial_velocity=10, initial_angle=15,
-                   motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=4, initial_range=20, initial_velocity=10, initial_angle=-15,
+        #            motion=MotionModel(motion="constant_velocity")),
+        # TargetSpec(id=5, initial_range=20, initial_velocity=10, initial_angle=15,
+        #            motion=MotionModel(motion="constant_velocity")),
         # TargetSpec(id=6, initial_range=20, initial_velocity=-8, initial_angle=45,
         #            motion=MotionModel(motion="constant_velocity")),
         # TargetSpec(id=7, initial_range=20, initial_velocity=8, initial_angle=-45,
@@ -54,17 +54,20 @@ pipeline_cfg = PipelineConfig()
 pipeline_cfg.visualization.backend = "pyqtgraph" # "mpl" or "pyqtgraph"
 pipeline_cfg.visualization.update_hz = 2
 pipeline_cfg.visualization.panels = ["rd_map", "ra_map", "trajectory", "diagnostic"]
-pipeline_cfg.tracking.filter = "kf"
+pipeline_cfg.tracking.filter = "ekf"
 pipeline_cfg.detection.cfar_algorithm = "ca_cfar"
 pipeline_cfg.estimation.doa_method = "music"  # "music" / "esprit" / "mvdr"/ "fft"
-enable_imm = False
+pipeline_cfg.tracking.process_noise = 10
+pipeline_cfg.tracking.measurement_noise = 1
+enable_imm = True
 if enable_imm:
     pipeline_cfg.tracking.filter = "ekf"
     pipeline_cfg.tracking.enable_imm = True
     pipeline_cfg.tracking.imm_models = ("cv", "ca", "ctra")
     pipeline_cfg.tracking.use_mahalanobis = True
     pipeline_cfg.tracking.use_velocity_gating = False
-    pipeline_cfg.tracking.process_noise = 0.5
+    # pipeline_cfg.tracking.process_noise = 10
+    # pipeline_cfg.tracking.measurement_noise = 1
 
 print(f"Backend: {pipeline_cfg.visualization.backend}")
 print(f"Targets: {len(scene.targets)}, Frames: {scene.num_frames}")
