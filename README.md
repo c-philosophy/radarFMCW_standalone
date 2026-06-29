@@ -39,6 +39,10 @@
 | 数据读取 | pandas（持久化模块加载 CSV 时使用） |
 | 测试框架 | pytest |
 
+### 效果展示
+![Real-time Visualization](outputs/Real-time%20Visualization.png)
+
+
 ### 架构概览图
 
 ```mermaid
